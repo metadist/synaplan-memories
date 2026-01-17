@@ -1,0 +1,56 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    container_name: synaplan-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC API
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__LOG_LEVEL=INFO
+    networks:
+      - synaplan-memories
+      - synaplan-network
+
+  qdrant-service:
+    build:
+      context: ./qdrant-service
+      dockerfile: Dockerfile
+    container_name: synaplan-qdrant-service
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    depends_on:
+      - qdrant
+    environment:
+      - QDRANT_URL=http://qdrant:6334
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT_COLLECTION_NAME=user_memories
+      - QDRANT_VECTOR_DIMENSION=1024
+      - PORT=8090
+      - SERVICE_API_KEY=${QDRANT_SERVICE_API_KEY:-changeme-in-production}
+      - RUST_LOG=synaplan_qdrant_service=debug,tower_http=info,axum=debug
+    networks:
+      - synaplan-memories
+      - synaplan-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  qdrant_storage:
+    driver: local
+
+networks:
+  synaplan-memories:
+    driver: bridge
+  synaplan-network:
+    external: true
+    name: synaplan_synaplan-network
+
