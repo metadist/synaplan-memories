@@ -32,6 +32,7 @@ services:
       - QDRANT_VECTOR_DIMENSION=1024
       - PORT=8090
       - SERVICE_API_KEY=${QDRANT_SERVICE_API_KEY:-changeme-in-production}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - RUST_LOG=synaplan_qdrant_service=debug,tower_http=info,axum=debug
     networks:
       - synaplan-memories

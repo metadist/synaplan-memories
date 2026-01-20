@@ -55,6 +55,13 @@ GET /health
 GET /collection/info
 ```
 
+### Capabilities (Feature discovery)
+```http
+GET /capabilities
+```
+
+Returns whether this service can create embeddings from text, plus vector dimension, backend, model and device.
+
 **Response:**
 ```json
 {
@@ -96,6 +103,28 @@ Content-Type: application/json
 }
 ```
 
+### Upsert Memory (Text → Embedding → Qdrant)
+```http
+POST /memories/text
+Content-Type: application/json
+
+{
+  "point_id": "mem_1_1737115234567",
+  "text": "food_preferences: Loves kebab",
+  "payload": {
+    "user_id": 1,
+    "category": "personal",
+    "key": "food_preferences",
+    "value": "Loves kebab",
+    "source": "auto_detected",
+    "message_id": 2565,
+    "created": 1737115234,
+    "updated": 1737115234,
+    "active": true
+  }
+}
+```
+
 ### Get Memory
 ```http
 GET /memories/{point_id}
@@ -130,6 +159,20 @@ Content-Type: application/json
   "category": "personal",  // optional
   "limit": 5,              // optional, default: 5
   "min_score": 0.7         // optional, default: 0.7
+}
+```
+
+### Search Memories (Text → Embedding → Qdrant)
+```http
+POST /memories/search-text
+Content-Type: application/json
+
+{
+  "query_text": "What is my job title?",
+  "user_id": 1,
+  "category": "work",
+  "limit": 5,
+  "min_score": 0.7
 }
 ```
 
@@ -206,6 +249,31 @@ Environment Variables:
 | `QDRANT_VECTOR_DIMENSION` | `1024` | Vector dimension (BGE-M3) |
 | `PORT` | `8090` | Service port |
 | `RUST_LOG` | `info` | Log level |
+| `EMBEDDING_BACKEND` | `none` | `none` \| `ollama` \| `onnxruntime` |
+| `EMBEDDING_MODEL` | - | e.g. `bge-m3` |
+| `EMBEDDING_DEVICE` | `auto` | `auto` \| `cpu` \| `cuda` |
+| `EMBEDDING_MAX_LENGTH` | `512` | Max token length for embeddings |
+| `OLLAMA_BASE_URL` | - | Required when `EMBEDDING_BACKEND=ollama` |
+| `EMBEDDING_ONNX_MODEL_PATH` | - | Required when `EMBEDDING_BACKEND=onnxruntime` |
+| `EMBEDDING_TOKENIZER_PATH` | - | Required when `EMBEDDING_BACKEND=onnxruntime` |
+
+## Native BGE-M3 (Rust + GPU via ONNX Runtime)
+
+This repo includes `qdrant-service/Dockerfile.cuda` which builds the service with `--features native_onnx`.
+
+You must provide:
+- a **CUDA-enabled** `libonnxruntime.so` in the runtime image (or mounted + `ORT_DYLIB_PATH`)
+- `EMBEDDING_ONNX_MODEL_PATH` + `EMBEDDING_TOKENIZER_PATH` pointing to mounted model files
+
+Example env:
+```bash
+EMBEDDING_BACKEND=onnxruntime
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_DEVICE=cuda
+EMBEDDING_ONNX_MODEL_PATH=/models/bge-m3/model.onnx
+EMBEDDING_TOKENIZER_PATH=/models/bge-m3/tokenizer.json
+EMBEDDING_MAX_LENGTH=512
+```
 
 ## Development
 

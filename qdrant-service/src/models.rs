@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize)]
+pub struct EmbeddingCapabilities {
+    pub supported: bool,
+    pub backend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub device: String,
+    pub vector_dimension: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceCapabilities {
+    pub service: String,
+    pub version: String,
+    pub vector_dimension: u64,
+    pub embedding: EmbeddingCapabilities,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryPayload {
     pub user_id: i64,
@@ -21,6 +39,13 @@ pub struct UpsertMemoryRequest {
     pub payload: MemoryPayload,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpsertMemoryTextRequest {
+    pub point_id: String,
+    pub text: String,
+    pub payload: MemoryPayload,
+}
+
 #[derive(Debug, Serialize)]
 pub struct MemoryResponse {
     pub id: String,
@@ -30,6 +55,18 @@ pub struct MemoryResponse {
 #[derive(Debug, Deserialize)]
 pub struct SearchMemoriesRequest {
     pub query_vector: Vec<f32>,
+    pub user_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    #[serde(default = "default_min_score")]
+    pub min_score: f32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchMemoriesTextRequest {
+    pub query_text: String,
     pub user_id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
@@ -176,5 +213,26 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("mem_1_123"));
         assert!(json.contains("0.95"));
+    }
+
+    #[test]
+    fn test_capabilities_serialization() {
+        let caps = ServiceCapabilities {
+            service: "synaplan-qdrant-service".to_string(),
+            version: "0.0.0".to_string(),
+            vector_dimension: 1024,
+            embedding: EmbeddingCapabilities {
+                supported: false,
+                backend: "none".to_string(),
+                model: None,
+                device: "auto".to_string(),
+                vector_dimension: 1024,
+            },
+        };
+
+        let json = serde_json::to_string(&caps).unwrap();
+        assert!(json.contains("synaplan-qdrant-service"));
+        assert!(json.contains("\"supported\":false"));
+        assert!(json.contains("\"vector_dimension\":1024"));
     }
 }

@@ -6,7 +6,7 @@ rust-version = "1.75"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.41", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "time"] }
 
 # Qdrant client (use latest)
 qdrant-client = "1.12"
@@ -20,6 +20,9 @@ tower-http = { version = "0.6", features = ["trace", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# Async trait for embedding interface
+async-trait = "0.1"
+
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
@@ -30,6 +33,30 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Configuration
 dotenvy = "0.15"
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# HTTP client for Discord webhooks
+reqwest = { version = "0.12", features = ["json"] }
+
+# Time utilities for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# Native embeddings (optional)
+ort = { version = "2.0.0-rc.11", optional = true, features = ["load-dynamic"] }
+tokenizers = { version = "0.21", optional = true }
+
+# TLS support (optional, enabled via feature flag)
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
+rustls = { version = "0.23", optional = true }
+rustls-pemfile = { version = "2.2", optional = true }
+
+[features]
+default = []
+tls = ["axum-server", "rustls", "rustls-pemfile"]
+native_onnx = ["ort", "tokenizers"]
 
 [profile.release]
 opt-level = 3          # Maximum optimization
