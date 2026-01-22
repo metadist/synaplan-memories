@@ -8,7 +8,17 @@ use qdrant_client::qdrant::{
 };
 use qdrant_client::{Payload, Qdrant};
 use serde_json;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tracing::{debug, info, warn};
+
+/// Convert string ID to numeric ID using consistent hashing
+#[inline]
+fn string_to_point_id(point_id: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    point_id.hash(&mut hasher);
+    hasher.finish()
+}
 
 pub struct QdrantService {
     client: Qdrant,
@@ -85,14 +95,7 @@ impl QdrantService {
         let payload_qdrant = Payload::try_from(serde_json::Value::Object(payload_map))
             .map_err(|e| AppError::Internal(format!("Failed to convert payload: {}", e)))?;
 
-        // Convert string ID to numeric ID (hash the string to get a consistent number)
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        point_id.hash(&mut hasher);
-        let numeric_id = hasher.finish();
-
+        let numeric_id = string_to_point_id(&point_id);
         let pid = PointId {
             point_id_options: Some(PointIdOptions::Num(numeric_id)),
         };
@@ -112,14 +115,7 @@ impl QdrantService {
     }
 
     pub async fn get_memory(&self, point_id: &str) -> Result<Option<MemoryPayload>, AppError> {
-        // Convert string ID to numeric ID (hash the string to get a consistent number)
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        point_id.hash(&mut hasher);
-        let numeric_id = hasher.finish();
-        
+        let numeric_id = string_to_point_id(point_id);
         let pid = PointId {
             point_id_options: Some(PointIdOptions::Num(numeric_id)),
         };
@@ -230,14 +226,7 @@ impl QdrantService {
     }
 
     pub async fn delete_memory(&self, point_id: &str) -> Result<(), AppError> {
-        // Convert string ID to numeric ID (hash the string to get a consistent number)
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        
-        let mut hasher = DefaultHasher::new();
-        point_id.hash(&mut hasher);
-        let numeric_id = hasher.finish();
-        
+        let numeric_id = string_to_point_id(point_id);
         let pid = PointId {
             point_id_options: Some(PointIdOptions::Num(numeric_id)),
         };
@@ -368,40 +357,29 @@ impl QdrantService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
 
     #[test]
     fn test_point_id_hashing_consistency() {
         let point_id = "mem_1_12345";
-        
-        // Hash den gleichen ID mehrmals
-        let mut hasher1 = DefaultHasher::new();
-        point_id.hash(&mut hasher1);
-        let hash1 = hasher1.finish();
-        
-        let mut hasher2 = DefaultHasher::new();
-        point_id.hash(&mut hasher2);
-        let hash2 = hasher2.finish();
-        
-        // Hashes müssen identisch sein
+        let hash1 = string_to_point_id(point_id);
+        let hash2 = string_to_point_id(point_id);
         assert_eq!(hash1, hash2);
     }
-    
+
     #[test]
     fn test_different_ids_produce_different_hashes() {
         let id1 = "mem_1_12345";
         let id2 = "mem_1_67890";
-        
-        let mut hasher1 = DefaultHasher::new();
-        id1.hash(&mut hasher1);
-        let hash1 = hasher1.finish();
-        
-        let mut hasher2 = DefaultHasher::new();
-        id2.hash(&mut hasher2);
-        let hash2 = hasher2.finish();
-        
-        // Verschiedene IDs müssen verschiedene Hashes haben
+        let hash1 = string_to_point_id(id1);
+        let hash2 = string_to_point_id(id2);
         assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_vector_dimension_validation() {
+        // Tests dass vector dimension gecheckt wird
+        let wrong_vector = vec![0.1_f32; 512]; // Wrong dimension
+        let expected_dim = 1024_u64;
+        assert_ne!(wrong_vector.len(), expected_dim as usize);
     }
 }

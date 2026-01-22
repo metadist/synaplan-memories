@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y \
 # Copy all source code
 COPY . .
 
+# Remove Cargo.lock to force resolution with vendored feature
+RUN rm -f Cargo.lock
+
 # Build the actual binary
 RUN cargo build --release
 

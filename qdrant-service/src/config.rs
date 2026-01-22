@@ -11,24 +11,9 @@ pub struct Config {
     pub tls_enabled: bool,
     pub tls_cert_path: Option<String>,
     pub tls_key_path: Option<String>,
-    pub discord_webhook_url: Option<String>,
-    /// Embedding backend used by this service (e.g. "none", "onnxruntime", "candle", "ollama").
-    /// This is exposed via /capabilities for downstream routing decisions.
-    pub embedding_backend: String,
-    /// Embedding model identifier (e.g. "bge-m3"). Exposed via /capabilities.
-    pub embedding_model: Option<String>,
-    /// Device used for embeddings ("cpu", "cuda", "auto"). Exposed via /capabilities.
-    pub embedding_device: String,
-
-    /// Optional Ollama base URL for embedding backend "ollama" (e.g. http://ollama:11434)
-    pub ollama_base_url: Option<String>,
-
-    /// Native ONNX embedding model path (e.g. /models/bge-m3/model.onnx)
-    pub embedding_onnx_model_path: Option<String>,
-    /// Tokenizer.json path (e.g. /models/bge-m3/tokenizer.json)
-    pub embedding_tokenizer_path: Option<String>,
-    /// Max token length for embeddings (keep small for memories; e.g. 256/512)
-    pub embedding_max_length: u32,
+    pub webhook_url: Option<String>,
+    pub enable_daily_stats: bool,
+    pub stats_interval_hours: u64,
 }
 
 impl Config {
@@ -54,17 +39,15 @@ impl Config {
                 .unwrap_or(false),
             tls_cert_path: env::var("TLS_CERT_PATH").ok(),
             tls_key_path: env::var("TLS_KEY_PATH").ok(),
-            discord_webhook_url: env::var("DISCORD_WEBHOOK_URL").ok(),
-            embedding_backend: env::var("EMBEDDING_BACKEND").unwrap_or_else(|_| "none".to_string()),
-            embedding_model: env::var("EMBEDDING_MODEL").ok(),
-            embedding_device: env::var("EMBEDDING_DEVICE").unwrap_or_else(|_| "auto".to_string()),
-            ollama_base_url: env::var("OLLAMA_BASE_URL").ok(),
-            embedding_onnx_model_path: env::var("EMBEDDING_ONNX_MODEL_PATH").ok(),
-            embedding_tokenizer_path: env::var("EMBEDDING_TOKENIZER_PATH").ok(),
-            embedding_max_length: env::var("EMBEDDING_MAX_LENGTH")
-                .unwrap_or_else(|_| "512".to_string())
+            webhook_url: env::var("WEBHOOK_URL").ok(),
+            enable_daily_stats: env::var("ENABLE_DAILY_STATS")
+                .unwrap_or_else(|_| "false".to_string())
                 .parse()
-                .unwrap_or(512),
+                .unwrap_or(false),
+            stats_interval_hours: env::var("STATS_INTERVAL_HOURS")
+                .unwrap_or_else(|_| "24".to_string())
+                .parse()
+                .unwrap_or(24),
         })
     }
 
@@ -80,14 +63,9 @@ impl Config {
             tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
-            discord_webhook_url: None,
-            embedding_backend: "none".to_string(),
-            embedding_model: None,
-            embedding_device: "auto".to_string(),
-            ollama_base_url: None,
-            embedding_onnx_model_path: None,
-            embedding_tokenizer_path: None,
-            embedding_max_length: 512,
+            webhook_url: None,
+            enable_daily_stats: false,
+            stats_interval_hours: 24,
         }
     }
 }
@@ -157,5 +135,34 @@ mod tests {
         assert!(result.is_err());
 
         env::remove_var("PORT");
+    }
+
+    #[test]
+    fn test_webhook_url() {
+        env::set_var("WEBHOOK_URL", "https://discord.com/api/webhooks/123");
+
+        let config = Config::from_env().unwrap();
+        assert_eq!(
+            config.webhook_url,
+            Some("https://discord.com/api/webhooks/123".to_string())
+        );
+
+        env::remove_var("WEBHOOK_URL");
+    }
+
+    #[test]
+    fn test_tls_config() {
+        env::set_var("TLS_ENABLED", "true");
+        env::set_var("TLS_CERT_PATH", "/path/to/cert.pem");
+        env::set_var("TLS_KEY_PATH", "/path/to/key.pem");
+
+        let config = Config::from_env().unwrap();
+        assert!(config.tls_enabled);
+        assert_eq!(config.tls_cert_path, Some("/path/to/cert.pem".to_string()));
+        assert_eq!(config.tls_key_path, Some("/path/to/key.pem".to_string()));
+
+        env::remove_var("TLS_ENABLED");
+        env::remove_var("TLS_CERT_PATH");
+        env::remove_var("TLS_KEY_PATH");
     }
 }

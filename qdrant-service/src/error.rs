@@ -19,9 +19,6 @@ pub enum AppError {
 
     #[error("Internal error: {0}")]
     Internal(String),
-
-    #[error("Service unavailable: {0}")]
-    ServiceUnavailable(String),
 }
 
 impl IntoResponse for AppError {
@@ -29,7 +26,6 @@ impl IntoResponse for AppError {
         let (status, message) = match self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             AppError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            AppError::ServiceUnavailable(msg) => (StatusCode::SERVICE_UNAVAILABLE, msg),
             AppError::Qdrant(ref e) => {
                 tracing::error!("Qdrant error: {:?}", e);
                 (

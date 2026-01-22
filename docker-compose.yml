@@ -26,22 +26,29 @@ services:
     depends_on:
       - qdrant
     environment:
+      # Qdrant connection
       - QDRANT_URL=http://qdrant:6334
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
       - QDRANT_COLLECTION_NAME=user_memories
       - QDRANT_VECTOR_DIMENSION=1024
+      
+      # Service config
       - PORT=8090
       - SERVICE_API_KEY=${QDRANT_SERVICE_API_KEY:-changeme-in-production}
-      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
-      - RUST_LOG=synaplan_qdrant_service=debug,tower_http=info,axum=debug
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      
+      # Logging
+      - RUST_LOG=synaplan_qdrant_service=info,tower_http=info
+    
     networks:
       - synaplan-memories
       - synaplan-network
+    
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 10s
 
 volumes:
@@ -54,4 +61,3 @@ networks:
   synaplan-network:
     external: true
     name: synaplan_synaplan-network
-

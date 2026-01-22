@@ -7,37 +7,86 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tracing::{error, info};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 mod auth;
+mod alerts;
 mod config;
-mod discord;
-mod embedding;
-#[cfg(feature = "native_onnx")]
-mod embedding_onnx;
 mod error;
 mod handlers;
 mod metrics;
-mod metrics_middleware;
 mod models;
 mod qdrant;
+mod request_id;
+mod stats;
 
 use auth::{auth_middleware, AuthState};
+use alerts::WebhookAlerts;
 use config::Config;
-use discord::DiscordAlerts;
-use embedding::{Embedder, OllamaEmbedder};
-#[cfg(feature = "native_onnx")]
-use embedding_onnx::OnnxRuntimeEmbedder;
 use error::AppError;
 use metrics::MetricsState;
 use qdrant::QdrantService;
+use stats::StatsTracker;
+
+/// OpenAPI documentation
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "Synaplan Qdrant Microservice",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "High-performance vector storage and search service for Synaplan memories.\n\n\
+        **Key Features:**\n\
+        - ✅ Vector storage with Qdrant (1024-dim BGE-M3 embeddings)\n\
+        - ✅ Semantic search with cosine similarity\n\
+        - ✅ Batch operations (up to 100 points)\n\
+        - ✅ User-scoped and category filtering\n\
+        - ✅ Prometheus metrics + Generic webhook alerts\n\
+        - ⚠️ Embedding removed - backend must send pre-computed vectors\n\n\
+        **Authentication:** Protected endpoints require `X-API-Key` header.\n\n\
+        **Performance:** 2-5ms search for 10k points, ~50ms for 100k points."
+    ),
+    paths(
+        handlers::get_capabilities,
+        handlers::upsert_memory,
+        handlers::get_memory,
+        handlers::delete_memory,
+        handlers::search_memories,
+        handlers::get_collection_info,
+        handlers::scroll_memories,
+        handlers::batch_upsert_memories,
+        handlers::get_service_info,
+    ),
+    components(schemas(
+        models::ServiceCapabilities,
+        models::EmbeddingCapabilities,
+        models::MemoryPayload,
+        models::UpsertMemoryRequest,
+        models::BatchUpsertRequest,
+        models::MemoryResponse,
+        models::SearchMemoriesRequest,
+        models::SearchResult,
+        models::SearchMemoriesResponse,
+        models::ScrollMemoriesRequest,
+        models::ScrollMemoriesResponse,
+        models::CollectionInfo,
+        models::BatchOperationResponse,
+        models::BatchError,
+    )),
+    tags(
+        (name = "Service Info", description = "Service capabilities, version, and statistics"),
+        (name = "Memories", description = "CRUD operations for memory storage and search")
+    )
+)]
+struct ApiDoc;
 
 #[derive(Clone)]
 pub struct AppState {
     qdrant: Arc<QdrantService>,
     config: Arc<Config>,
-    embedder: Option<Arc<dyn Embedder>>,
     metrics: MetricsState,
-    discord: DiscordAlerts,
+    alerts: WebhookAlerts,
+    stats: StatsTracker,
 }
 
 #[tokio::main]
@@ -55,6 +104,13 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
     let config = Config::from_env()?;
     info!("Configuration loaded: {:?}", config);
+    if config.tls_cert_path.is_some() || config.tls_key_path.is_some() {
+        info!(
+            "TLS paths configured (cert: {:?}, key: {:?})",
+            config.tls_cert_path,
+            config.tls_key_path
+        );
+    }
 
     // Initialize Prometheus metrics exporter
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
@@ -66,8 +122,13 @@ async fn main() -> anyhow::Result<()> {
     // Initialize metrics state
     let metrics = MetricsState::new();
 
-    // Initialize Discord alerts
-    let discord = DiscordAlerts::new(config.discord_webhook_url.clone());
+    // Initialize stats tracker
+    let stats = StatsTracker::new();
+
+    // Initialize webhook alerts (filter out empty strings)
+    let alerts = WebhookAlerts::new(
+        config.webhook_url.clone().filter(|url| !url.is_empty())
+    );
 
     // Initialize Qdrant service
     let qdrant = match QdrantService::new(&config).await {
@@ -75,7 +136,7 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => {
             let error_msg = format!("Failed to connect to Qdrant: {}", e);
             error!("{}", error_msg);
-            discord.alert_qdrant_connection_failed(&error_msg).await;
+            alerts.alert_qdrant_connection_failed(&error_msg).await;
             return Err(e);
         }
     };
@@ -85,58 +146,8 @@ async fn main() -> anyhow::Result<()> {
     qdrant.ensure_collection_exists().await?;
     info!("Collection '{}' is ready", config.collection_name);
 
-    // Initialize embedding backend (optional).
-    // NOTE: This is the first step to move vectorization out of PHP. We keep vector-based routes as fallback.
-    let embedder: Option<Arc<dyn Embedder>> = match config.embedding_backend.as_str() {
-        "none" => None,
-        "ollama" => {
-            let base_url = config.ollama_base_url.clone().ok_or_else(|| {
-                anyhow::anyhow!("EMBEDDING_BACKEND=ollama requires OLLAMA_BASE_URL")
-            })?;
-            let model = config
-                .embedding_model
-                .clone()
-                .unwrap_or_else(|| "bge-m3".to_string());
-            info!("Embedding backend enabled: ollama (model={})", model);
-            Some(Arc::new(OllamaEmbedder::new(base_url, model)))
-        }
-        "onnxruntime" => {
-            #[cfg(feature = "native_onnx")]
-            {
-                let model = config
-                    .embedding_model
-                    .clone()
-                    .unwrap_or_else(|| "bge-m3".to_string());
-                let device = config.embedding_device.clone();
-                info!("Embedding backend enabled: onnxruntime (model={}, device={})", model, device);
-
-                match OnnxRuntimeEmbedder::try_new(&config, model, device) {
-                    Ok(e) => Some(Arc::new(e)),
-                    Err(e) => {
-                        tracing::error!("Failed to init onnxruntime embedder: {}", e);
-                        None
-                    }
-                }
-            }
-            #[cfg(not(feature = "native_onnx"))]
-            {
-                tracing::warn!(
-                    "EMBEDDING_BACKEND=onnxruntime requested but binary was built without feature 'native_onnx'. Embeddings disabled (fallback expected)."
-                );
-                None
-            }
-        }
-        other => {
-            tracing::warn!(
-                "Unknown or unsupported EMBEDDING_BACKEND='{}'. Embeddings disabled (fallback expected).",
-                other
-            );
-            None
-        }
-    };
-
     // Send startup notification
-    discord
+    alerts
         .alert_service_started(env!("CARGO_PKG_VERSION"))
         .await;
 
@@ -144,27 +155,29 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         qdrant: Arc::new(qdrant),
         config: Arc::new(config.clone()),
-        embedder,
         metrics: metrics.clone(),
-        discord: discord.clone(),
+        alerts: alerts.clone(),
+        stats: stats.clone(),
     };
 
     // Create auth state
-    let auth_state = Arc::new(AuthState {
-        api_key: config.service_api_key.clone(),
-    });
+    let auth_state = Arc::new(AuthState::new(config.service_api_key.clone()));
+    if auth_state.is_enabled() {
+        info!("API key authentication enabled");
+    } else {
+        info!("API key authentication disabled");
+    }
 
     // Build protected routes (require API key if configured)
     let protected_routes = Router::new()
         .route("/memories", post(handlers::upsert_memory))
-        .route("/memories/text", post(handlers::upsert_memory_text))
+        .route("/memories/batch", post(handlers::batch_upsert_memories))
         .route("/memories/:point_id", get(handlers::get_memory))
         .route("/memories/:point_id", delete(handlers::delete_memory))
         .route("/memories/search", post(handlers::search_memories))
-        .route("/memories/search-text", post(handlers::search_memories_text))
         .route("/memories/scroll", post(handlers::scroll_memories))
         .route("/collection/info", get(handlers::get_collection_info))
-        .route("/info", get(handlers::get_service_info))
+        .route("/service/info", get(handlers::get_service_info))
         .route_layer(axum::middleware::from_fn_with_state(
             auth_state.clone(),
             auth_middleware,
@@ -178,15 +191,17 @@ async fn main() -> anyhow::Result<()> {
         .route("/metrics", get(move || async move {
             prometheus_handle.render()
         }))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .with_state(state);
 
-    // Combine routes
+    // Combine routes with Request ID tracking + Metrics + Tracing + CORS
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
+        .layer(axum::middleware::from_fn(request_id::request_id_middleware))
         .layer(axum::middleware::from_fn_with_state(
             metrics.clone(),
-            metrics_middleware::metrics_middleware,
+            metrics::track_metrics,
         ))
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
@@ -200,11 +215,24 @@ async fn main() -> anyhow::Result<()> {
                 .allow_headers(tower_http::cors::Any),
         );
 
-    // Start server
+    // Start server with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     info!("Starting server on {}", addr);
+    info!("📖 Swagger UI available at http://{}/swagger-ui", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
+
+    // Spawn daily stats task if enabled
+    if config.enable_daily_stats {
+        let stats_task_state = state.clone();
+        tokio::spawn(async move {
+            daily_stats_task(stats_task_state).await;
+        });
+        info!(
+            "📊 Daily stats reporting enabled (every {} hours)",
+            config.stats_interval_hours
+        );
+    }
 
     // Check if TLS is enabled
     #[cfg(feature = "tls")]
@@ -215,21 +243,94 @@ async fn main() -> anyhow::Result<()> {
         
         axum_server::bind_rustls(addr, tls_config)
             .serve(app.into_make_service())
+            .with_graceful_shutdown(shutdown_signal())
             .await?;
     } else {
         info!("TLS disabled - starting HTTP server");
-        axum::serve(listener, app).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
     }
 
     #[cfg(not(feature = "tls"))]
     {
         if config.tls_enabled {
-            tracing::warn!("TLS requested but not compiled with TLS support. Starting HTTP server instead.");
+            tracing::warn!(
+                "TLS requested but not compiled with TLS support. Starting HTTP server instead. (TLS_CERT_PATH={:?}, TLS_KEY_PATH={:?})",
+                config.tls_cert_path,
+                config.tls_key_path
+            );
         }
-    axum::serve(listener, app).await?;
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
     }
 
     Ok(())
+}
+
+/// Daily statistics reporting task
+///
+/// Runs in the background and sends stats to webhook at configured intervals.
+/// Automatically resets stats after each report.
+async fn daily_stats_task(state: AppState) {
+    let interval_hours = state.config.stats_interval_hours;
+    let interval = tokio::time::Duration::from_secs(interval_hours * 3600);
+
+    loop {
+        tokio::time::sleep(interval).await;
+
+        // Get stats snapshot
+        let snapshot = state.stats.get_snapshot();
+
+        // Send to webhook
+        state
+            .alerts
+            .send_daily_stats(&snapshot, &state.config.collection_name)
+            .await;
+
+        // Reset stats for next period
+        state.stats.reset();
+
+        info!(
+            "Daily stats sent: {} upserts, {} searches, {} deletes",
+            snapshot.upserts, snapshot.searches, snapshot.deletes
+        );
+    }
+}
+
+/// Graceful shutdown signal handler
+///
+/// **Purpose:** Waits for SIGTERM (Docker stop) or SIGINT (Ctrl+C) and closes connections cleanly.
+/// Prevents: "Connection reset by peer" errors during deployment restarts.
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("Received Ctrl+C, shutting down gracefully...");
+        },
+        _ = terminate => {
+            info!("Received SIGTERM, shutting down gracefully...");
+        },
+    }
 }
 
 #[cfg(feature = "tls")]
@@ -296,21 +397,11 @@ async fn health_check(State(state): State<AppState>) -> Result<Json<serde_json::
     if requests_total > 100 && success_rate < 95.0 {
         let error_rate = 100.0 - success_rate;
         tokio::spawn({
-            let discord = state.discord.clone();
+            let alerts = state.alerts.clone();
             async move {
-                discord
+                alerts
                     .alert_high_error_rate(error_rate, requests_failed, requests_total)
                     .await;
-            }
-        });
-    }
-
-    // Check for high collection usage (warning at 100k points)
-    if points_count > 100_000 && points_count % 10_000 == 0 {
-        tokio::spawn({
-            let discord = state.discord.clone();
-            async move {
-                discord.alert_collection_high_usage(points_count).await;
             }
         });
     }

@@ -1,6 +1,17 @@
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+/// Service capabilities exposed via /capabilities endpoint
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ServiceCapabilities {
+    pub service: String,
+    pub version: String,
+    pub vector_dimension: u64,
+    pub embedding: EmbeddingCapabilities,
+}
+
+/// Embedding capabilities (always disabled - backend handles embedding)
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct EmbeddingCapabilities {
     pub supported: bool,
     pub backend: String,
@@ -10,94 +21,142 @@ pub struct EmbeddingCapabilities {
     pub vector_dimension: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct ServiceCapabilities {
-    pub service: String,
-    pub version: String,
-    pub vector_dimension: u64,
-    pub embedding: EmbeddingCapabilities,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Memory payload structure
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "user_id": 1730,
+    "category": "personal",
+    "key": "name",
+    "value": "Yusuf Senel",
+    "source": "auto_detected",
+    "message_id": 4488,
+    "created": 1769034136,
+    "updated": 1769034136,
+    "active": true
+}))]
 pub struct MemoryPayload {
+    #[schema(example = 1730)]
     pub user_id: i64,
+    #[schema(example = "personal")]
     pub category: String,
+    #[schema(example = "name")]
     pub key: String,
+    #[schema(example = "Yusuf Senel")]
     pub value: String,
+    #[schema(example = "auto_detected")]
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = 4488)]
     pub message_id: Option<i64>,
+    #[schema(example = 1769034136)]
     pub created: i64,
+    #[schema(example = 1769034136)]
     pub updated: i64,
+    #[schema(example = true)]
     pub active: bool,
 }
 
-#[derive(Debug, Deserialize)]
+/// Upsert memory with pre-computed vector
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "point_id": "mem_1730_12345",
+    "vector": [0.1, 0.2, 0.3],
+    "payload": {
+        "user_id": 1730,
+        "category": "personal",
+        "key": "name",
+        "value": "Yusuf Senel",
+        "source": "auto_detected",
+        "created": 1769034136,
+        "updated": 1769034136,
+        "active": true
+    }
+}))]
 pub struct UpsertMemoryRequest {
+    #[schema(example = "mem_1730_12345")]
     pub point_id: String,
+    #[schema(example = json!([0.1, 0.2, 0.3]))]
     pub vector: Vec<f32>,
     pub payload: MemoryPayload,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpsertMemoryTextRequest {
-    pub point_id: String,
-    pub text: String,
-    pub payload: MemoryPayload,
+/// Batch upsert multiple memories
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BatchUpsertRequest {
+    #[schema(min_items = 1, max_items = 100)]
+    pub points: Vec<UpsertMemoryRequest>,
 }
 
-#[derive(Debug, Serialize)]
+/// Memory response
+#[derive(Debug, Serialize, ToSchema)]
 pub struct MemoryResponse {
     pub id: String,
     pub payload: MemoryPayload,
 }
 
-#[derive(Debug, Deserialize)]
+/// Search memories by vector
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "query_vector": [0.1, 0.2, 0.3],
+    "user_id": 1730,
+    "category": "personal",
+    "limit": 15,
+    "min_score": 0.35
+}))]
 pub struct SearchMemoriesRequest {
+    #[schema(example = json!([0.1, 0.2, 0.3]))]
     pub query_vector: Vec<f32>,
+    #[schema(example = 1730)]
     pub user_id: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "personal")]
     pub category: Option<String>,
     #[serde(default = "default_limit")]
+    #[schema(example = 15, minimum = 1, maximum = 100)]
     pub limit: u64,
     #[serde(default = "default_min_score")]
+    #[schema(example = 0.35, minimum = 0.0, maximum = 1.0)]
     pub min_score: f32,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct SearchMemoriesTextRequest {
-    pub query_text: String,
-    pub user_id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    #[serde(default = "default_limit")]
-    pub limit: u64,
-    #[serde(default = "default_min_score")]
-    pub min_score: f32,
-}
-
-fn default_limit() -> u64 {
-    5
-}
-
-fn default_min_score() -> f32 {
-    0.7
-}
-
-#[derive(Debug, Serialize)]
+/// Search result with score
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SearchResult {
     pub id: String,
+    #[schema(example = 0.95, minimum = 0.0, maximum = 1.0)]
     pub score: f32,
     pub payload: MemoryPayload,
 }
 
-#[derive(Debug, Serialize)]
+/// Search response
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SearchMemoriesResponse {
     pub results: Vec<SearchResult>,
     pub count: usize,
 }
 
-#[derive(Debug, Serialize)]
+/// Scroll (list all) memories request
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ScrollMemoriesRequest {
+    #[schema(example = 1730)]
+    pub user_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "personal")]
+    pub category: Option<String>,
+    #[serde(default = "default_scroll_limit")]
+    #[schema(example = 1000, minimum = 1, maximum = 10000)]
+    pub limit: u64,
+}
+
+/// Scroll memories response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ScrollMemoriesResponse {
+    pub memories: Vec<MemoryResponse>,
+    pub count: usize,
+}
+
+/// Collection information
+#[derive(Debug, Serialize, ToSchema)]
 pub struct CollectionInfo {
     pub status: String,
     pub points_count: u64,
@@ -105,25 +164,36 @@ pub struct CollectionInfo {
     pub indexed_vectors_count: u64,
 }
 
-// Scroll (list all) memories request
-#[derive(Debug, Deserialize)]
-pub struct ScrollMemoriesRequest {
-    pub user_id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
-    #[serde(default = "default_scroll_limit")]
-    pub limit: u64,
+/// Batch operation response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BatchOperationResponse {
+    pub success_count: usize,
+    pub failed_count: usize,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<BatchError>,
 }
 
-fn default_scroll_limit() -> u64 {
+/// Individual batch operation error
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BatchError {
+    pub point_id: String,
+    pub error: String,
+}
+
+// Default functions
+#[inline]
+const fn default_limit() -> u64 {
+    5
+}
+
+#[inline]
+const fn default_min_score() -> f32 {
+    0.7
+}
+
+#[inline]
+const fn default_scroll_limit() -> u64 {
     1000
-}
-
-// Scroll memories response
-#[derive(Debug, Serialize)]
-pub struct ScrollMemoriesResponse {
-    pub memories: Vec<MemoryResponse>,
-    pub count: usize,
 }
 
 // Unit tests for models

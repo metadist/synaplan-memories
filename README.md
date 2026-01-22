@@ -1,225 +1,265 @@
-# Qdrant Memories Integration
+# Synaplan Qdrant Microservice
 
-Rust microservice providing vector search for Synaplan user memories using Qdrant.
+High-performance vector storage and search microservice for AI memories, RAG documents, and false positives detection.
+
+## Features
+
+- **Vector Storage & Search**: Fast semantic search using Qdrant vector database
+- **Namespace Support**: Separate collections for memories, RAG docs, false positives
+- **Metrics & Monitoring**: Prometheus metrics, health checks, webhook alerts
+- **Security**: API key authentication, optional TLS support
+- **Performance**: Production-ready Rust implementation with connection pooling
+
+## Architecture
+
+```
+Backend (PHP) → Qdrant Microservice (Rust) → Qdrant Database
+                        ↓
+                   Webhook Alerts
+                   (Discord/Slack/Telegram)
+```
+
+**Responsibilities:**
+- ✅ Store pre-computed vectors (1024-dim BGE-M3)
+- ✅ Semantic search with filters (user_id, category, min_score)
+- ✅ Collection management & health monitoring
+- ❌ **NOT** responsible for embedding generation (handled by backend)
 
 ## Quick Start
 
+### Prerequisites
+
 ```bash
-# Start services
 docker compose up -d
+```
 
-# Check health (with metrics)
-curl http://localhost:8090/health
+### Environment Variables
 
-# Get Prometheus metrics
-curl http://localhost:8090/metrics
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `QDRANT_URL` | No | `http://localhost:6334` | Qdrant gRPC endpoint |
+| `QDRANT_API_KEY` | No | - | Qdrant API key (if enabled) |
+| `QDRANT_COLLECTION_NAME` | No | `user_memories` | Collection name |
+| `QDRANT_VECTOR_DIMENSION` | No | `1024` | Vector dimension (BGE-M3) |
+| `PORT` | No | `8090` | Service HTTP port |
+| `SERVICE_API_KEY` | No | - | API key for authentication |
+| `WEBHOOK_URL` | No | - | Webhook URL for alerts (Discord/Slack/Telegram) |
+| `ENABLE_DAILY_STATS` | No | `false` | Enable daily statistics reports to webhook |
+| `STATS_INTERVAL_HOURS` | No | `24` | Interval in hours between stats reports |
+| `RUST_LOG` | No | `info` | Log level |
 
-# Get service info (version, stats, etc.) - requires API key
-curl -H "X-API-Key: your-api-key" http://localhost:8090/info
+### Example Configuration
 
-# View logs
-./logs.sh              # Follow logs in real-time
-./logs.sh tail 100     # Show last 100 lines
-./logs.sh test         # Test health + show request logs
-
-# Run tests
-./test_integration.sh
+```bash
+# docker-compose.yml or .env
+QDRANT_URL=http://qdrant:6334
+QDRANT_COLLECTION_NAME=user_memories
+QDRANT_VECTOR_DIMENSION=1024
+PORT=8090
+SERVICE_API_KEY=your-secret-key
+WEBHOOK_URL=https://discord.com/api/webhooks/...
+ENABLE_DAILY_STATS=true
+STATS_INTERVAL_HOURS=24
+RUST_LOG=synaplan_qdrant_service=info,tower_http=info
 ```
 
 ## API Endpoints
 
-### Public Endpoints (No Auth)
-- `GET /health` - Health check with metrics (uptime, request stats, Qdrant status)
-- `GET /metrics` - Prometheus metrics endpoint
+### Health & Status
 
-### Protected Endpoints (Require API Key via `X-API-Key` header)
-- `GET /info` - Service info (version, stats, collection info)
-- `POST /memories` - Upsert memory
-- `GET /memories/:point_id` - Get memory
-- `DELETE /memories/:point_id` - Delete memory
-- `POST /memories/search` - Vector search
-- `POST /memories/scroll` - List all memories
-- `GET /collection/info` - Collection stats
+```bash
+# Health check (unauthenticated)
+GET /health
 
-## Health Check Response
+# Service info (requires auth)
+GET /info
 
-```json
+# Collection info (requires auth)
+GET /collection/info
+
+# Capabilities (unauthenticated, cacheable)
+GET /capabilities
+```
+
+### Vector Operations
+
+All endpoints require API key authentication via `X-API-Key` header.
+
+#### Upsert Memory
+
+```bash
+POST /memories
+Content-Type: application/json
+X-API-Key: your-secret-key
+
 {
-  "status": "healthy",
-  "service": "synaplan-qdrant-service",
-  "version": "0.1.0",
-  "uptime_seconds": 3600,
-  "qdrant": {
-    "status": "connected",
-    "collection_status": "Green",
-    "points_count": 1234,
-    "vectors_count": 1234
-  },
-  "metrics": {
-    "requests_total": 5678,
-    "requests_failed": 12,
-    "requests_success": 5666,
-    "success_rate_percent": "99.79"
+  "point_id": "mem_1730_123456",
+  "vector": [0.1, 0.2, ...], // 1024-dim array
+  "payload": {
+    "user_id": 1730,
+    "category": "personal",
+    "key": "name",
+    "value": "Yusuf Senel"
   }
 }
 ```
 
-## Service Info Response
+#### Search Memories
 
-```json
+```bash
+POST /memories/search
+Content-Type: application/json
+X-API-Key: your-secret-key
+
 {
-  "service": "synaplan-qdrant-service",
-  "version": "0.1.0",
-  "rust_version": "1.75",
-  "status": "healthy",
-  "collection": {
-    "status": "green",
-    "points_count": 1234,
-    "vectors_count": 1234,
-    "indexed_vectors_count": 1234
-  }
+  "vector": [0.1, 0.2, ...], // 1024-dim query vector
+  "user_id": 1730,
+  "category": "personal", // optional
+  "limit": 15,
+  "min_score": 0.35
 }
 ```
 
-## Prometheus Metrics
-
-Available at `/metrics`:
-
-```
-# Request metrics
-requests_total                   # Total requests received
-requests_failed                  # Failed requests (4xx/5xx)
-request_duration_seconds         # Request duration histogram
-
-# Service metrics
-uptime_seconds                   # Service uptime
-qdrant_points_total              # Total points in Qdrant
-qdrant_vectors_total             # Total vectors in Qdrant
-```
-
-**Integration example (prometheus.yml):**
-```yaml
-scrape_configs:
-  - job_name: 'qdrant-service'
-    static_configs:
-      - targets: ['qdrant-service:8090']
-    metrics_path: '/metrics'
-```
-
-## TLS/HTTPS Support
-
-Enable HTTPS with the `tls` feature (optional):
+#### Scroll (List All)
 
 ```bash
-# Build with TLS support
-docker build --build-arg CARGO_FEATURES="tls" -t synaplan-memories:latest .
+POST /memories/scroll
+Content-Type: application/json
+X-API-Key: your-secret-key
 
-# Configure TLS (docker-compose.yml or .env)
-TLS_ENABLED=true
-TLS_CERT_PATH=/path/to/cert.pem
-TLS_KEY_PATH=/path/to/key.pem
+{
+  "user_id": 1730,
+  "category": "personal", // optional
+  "limit": 100
+}
 ```
 
-**Production Recommendation:** Use a reverse proxy (Nginx/Caddy) for TLS termination instead of built-in TLS.
+#### Get Memory
 
-## Monitoring & Logs
-
-**View live logs:**
 ```bash
-./logs.sh follow       # or just: ./logs.sh
+GET /memories/:point_id
+X-API-Key: your-secret-key
 ```
 
-**Test & see request logs:**
+#### Delete Memory
+
 ```bash
-./logs.sh test
+DELETE /memories/:point_id
+X-API-Key: your-secret-key
 ```
 
-**What you'll see in logs:**
+## Development
+
+### Build
+
+```bash
+cd qdrant-service
+cargo build --release
 ```
-[DEBUG] request{method=POST uri=/memories ...}: started processing request
-[DEBUG] request{...}: finished processing request latency=2 ms status=200
-[INFO] Memory upserted: mem_1_123
+
+### Run Tests
+
+```bash
+cargo test
 ```
 
-**Log levels:**
-- `DEBUG`: Request details (method, URI, latency, status)
-- `INFO`: Service events (startup, memory operations)
-- `WARN`: Non-critical issues
-- `ERROR`: Critical failures
+### Run Locally
 
-## Architecture
+```bash
+# Start Qdrant first
+docker compose up -d qdrant
 
-- **Qdrant** (v1.12.5): Vector database (port 6333/6334)
-- **Rust Service** (port 8090): REST API gateway to Qdrant with metrics
-- **PHP Backend**: Uses `QdrantClientHttp` to call Rust service
-
-## Configuration
-
-Copy `.env.example` in `qdrant-service/` and set:
-- `QDRANT_URL`: Qdrant gRPC URL (default: `http://qdrant:6334`)
-- `QDRANT_VECTOR_DIMENSION`: Embedding size (default: `1024` for BGE-M3)
-- `SERVICE_API_KEY`: Auth key for service access (required in production)
-- `DISCORD_WEBHOOK_URL`: Discord webhook for alerts (optional)
-- `RUST_LOG`: Log level (default: `synaplan_qdrant_service=debug,tower_http=info`)
-- `TLS_ENABLED`: Enable HTTPS (default: `false`)
-- `TLS_CERT_PATH`: Path to TLS certificate (if TLS enabled)
-- `TLS_KEY_PATH`: Path to TLS private key (if TLS enabled)
-
-## Discord Alerts 🔔
-
-The service can send alerts to Discord for important events:
-
-### Setup:
-1. Create a Discord webhook: Server Settings → Integrations → Webhooks → New Webhook
-2. Copy the webhook URL
-3. Set environment variable:
-   ```bash
-   DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_ID/YOUR_TOKEN
-   ```
-
-### What gets alerted:
-
-**ℹ️ Info (Blue):**
-- Service started/online
-
-**⚠️ Warning (Orange):**
-- Service stopping
-- High collection usage (>100k points)
-
-**❌ Error (Red):**
-- High error rate (>5% of requests failing)
-
-**🚨 Critical (@here ping, Dark Red):**
-- Cannot connect to Qdrant database
-- Service panic/crash
-
-Example alert:
+# Run service
+RUST_LOG=debug cargo run
 ```
-@here **CRITICAL ALERT**
 
-🚨 Qdrant Connection Failed
-Cannot connect to Qdrant database: connection refused
+### Benchmark
 
-Synaplan Qdrant Microservice
-2026-01-20T23:45:00Z
+```bash
+./qdrant-service/benchmark.sh
 ```
+
+## Production Deployment
+
+### Docker Compose
+
+```bash
+docker compose up -d
+```
+
+### Monitoring
+
+- **Metrics**: `http://localhost:8090/metrics` (Prometheus format)
+- **Health**: `http://localhost:8090/health`
+- **Logs**: `docker compose logs -f qdrant-service`
+
+### Webhook Alerts
+
+Configure `WEBHOOK_URL` to receive alerts for:
+- ✅ Service startup
+- ❌ Qdrant connection failures
+- ⚠️ High error rates (>5%)
+- 📊 Daily statistics reports (if `ENABLE_DAILY_STATS=true`)
+
+**Supported platforms:** Discord, Slack, Telegram (webhook-compatible)
+
+**Daily Statistics:**
+- Enable with `ENABLE_DAILY_STATS=true`
+- Configure interval with `STATS_INTERVAL_HOURS` (default: 24 hours)
+- Sends formatted report with:
+  - Total vectors upserted
+  - Total searches performed
+  - Total vectors deleted
+  - Service uptime
+- Discord-optimized format with rich embeds and number formatting
 
 ## Performance
 
-- **Single instance**: ~200 req/s (upsert + search)
-- **5 replicas**: ~1,000 req/s
-- **Qdrant cluster**: 10,000+ req/s
+- **Latency**: ~2-5ms for vector search (100k points)
+- **Throughput**: ~1000 req/s (single instance)
+- **Memory**: ~50MB baseline + 1-2MB per 10k points
+- **CPU**: ~1-2% idle, ~50% under load
 
-See `SCALING.md` for production setup.
+## Best Practices
 
-## Testing
+1. **Use appropriate vector dimensions** (1024 for BGE-M3)
+2. **Set reasonable limits** (max 100 results per search)
+3. **Use min_score filtering** (0.3-0.5 for semantic search)
+4. **Monitor collection size** (consider archiving old memories)
+5. **Enable API key authentication** in production
+6. **Configure webhook alerts** for critical errors
 
-See `TESTING.md` for details.
+## Troubleshooting
 
-## Files
+### Connection Refused
 
-- `qdrant-service/`: Rust microservice code
-- `logs.sh`: Log monitoring helper
-- `test_integration.sh`: E2E tests
-- `TESTING.md`: Test guide
-- `SCALING.md`: Production scaling guide
+```bash
+# Check if Qdrant is running
+docker compose ps qdrant
+
+# Check Qdrant logs
+docker compose logs qdrant
+```
+
+### High Memory Usage
+
+```bash
+# Check collection size
+curl -H "X-API-Key: your-key" http://localhost:8090/collection/info
+
+# Consider archiving old data or increasing resources
+```
+
+### Slow Searches
+
+- Reduce search limit (15-30 recommended)
+- Increase min_score threshold
+- Check Qdrant indexing status
+
+## License
+
+Proprietary - Synaplan GmbH
+
+## Support
+
+For issues or questions, contact the Synaplan development team.
