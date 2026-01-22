@@ -192,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
             prometheus_handle.render()
         }))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .with_state(state);
+        .with_state(state.clone());
 
     // Combine routes with Request ID tracking + Metrics + Tracing + CORS
     let app = Router::new()
