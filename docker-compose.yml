@@ -41,12 +41,10 @@ services:
     # Cluster command (set in start-node*.sh for cluster mode)
     # Leave empty for single-node development
     command: ${QDRANT_COMMAND:-}
+    # Note: qdrant image (debian:slim) doesn't include curl/wget
+    # Disable healthcheck - qdrant-service handles connection retries
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:6333/readyz || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      disable: true
 
   # Qdrant Service (Rust microservice wrapper)
   # Always built from source (./qdrant-service)
@@ -57,13 +55,13 @@ services:
     container_name: synaplan-qdrant-service
     restart: unless-stopped
     env_file:
-      - path: .env
+      - path: qdrant-service/.env
         required: false
     ports:
       - "8090:8090"
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
     environment:
       # Qdrant connection (via Docker network)
       QDRANT_URL: http://qdrant:6334
