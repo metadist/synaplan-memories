@@ -46,11 +46,9 @@ export QDRANT_REST_PORT=127.0.0.1:6333
 
 echo "  Qdrant Storage: /qdrant/storage (local)"
 
-# Stop existing containers
-docker compose down
-
 # Build and start (pulls qdrant image, builds qdrant-service from source)
-docker compose up --build --pull always -d
+# Use --force-recreate to ensure containers are refreshed
+docker compose up --build --pull always --force-recreate -d
 
 echo ""
 echo "Waiting for Qdrant to start..."
