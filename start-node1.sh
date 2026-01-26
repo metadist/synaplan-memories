@@ -39,7 +39,6 @@ fi
 export QDRANT_CLUSTER_ENABLED=true
 export QDRANT_COMMAND="--uri http://${NODE_IP}:6335"
 export QDRANT_STORAGE_PATH=/qdrant/storage
-export QDRANT_SERVICE_IMAGE=ghcr.io/metadist/synaplan-qdrant-service:latest
 export OLLAMA_BASE_URL=http://10.0.1.10:11434
 
 # Don't expose REST API to all interfaces in production
@@ -50,8 +49,8 @@ echo "  Qdrant Storage: /qdrant/storage (local)"
 # Stop existing containers
 docker compose down
 
-# Pull latest images and start
-docker compose up --pull always -d
+# Build and start (pulls qdrant image, builds qdrant-service from source)
+docker compose up --build --pull always -d
 
 echo ""
 echo "Waiting for Qdrant to start..."

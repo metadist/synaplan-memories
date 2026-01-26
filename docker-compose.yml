@@ -49,10 +49,8 @@ services:
       start_period: 30s
 
   # Qdrant Service (Rust microservice wrapper)
+  # Always built from source (./qdrant-service)
   qdrant-service:
-    # Development: build from source
-    # Production: use pre-built image
-    image: ${QDRANT_SERVICE_IMAGE:-}
     build:
       context: ./qdrant-service
       dockerfile: Dockerfile
