@@ -44,7 +44,7 @@ fi
 
 # Cluster configuration
 export QDRANT_CLUSTER_ENABLED=true
-export QDRANT_COMMAND="--bootstrap http://${BOOTSTRAP_IP}:6335"
+export QDRANT_COMMAND="./qdrant --bootstrap http://${BOOTSTRAP_IP}:6335"
 export QDRANT_STORAGE_PATH=/qdrant/storage
 export OLLAMA_BASE_URL=http://10.0.1.10:11434
 
