@@ -1,49 +1,87 @@
+# Synaplan Memory Service - Qdrant Vector Database + Rust Microservice
+#
+# This compose file supports two modes:
+#
+# LOCAL DEVELOPMENT (default):
+#   docker compose up -d
+#   - Single Qdrant instance
+#   - Builds qdrant-service from source
+#   - Ports exposed for debugging
+#
+# CLUSTER DEPLOYMENT:
+#   See CLUSTER.md for full instructions.
+#   Uses env_file and QDRANT_COMMAND for cluster configuration.
+
 services:
+  # Qdrant Vector Database
   qdrant:
     image: qdrant/qdrant:v1.12.5
     container_name: synaplan-qdrant
     restart: unless-stopped
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC API
+      # P2P port for cluster communication (cluster mode only)
+      - "${QDRANT_P2P_PORT:-6335}:6335"
+      # REST API - exposed for debugging in dev, internal-only in production
+      - "${QDRANT_REST_PORT:-6333}:6333"
+    expose:
+      - "6334"  # gRPC API (internal)
     volumes:
-      - qdrant_storage:/qdrant/storage
+      # CRITICAL for cluster: Must be LOCAL SSD, not NFS!
+      # Development: uses Docker volume
+      # Production: mount /qdrant/storage from local disk
+      - ${QDRANT_STORAGE_PATH:-qdrant_storage}:/qdrant/storage
     environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-      - QDRANT__LOG_LEVEL=INFO
-    networks:
-      - synaplan-memories
-      - synaplan-network
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__LOG_LEVEL: "${QDRANT_LOG_LEVEL:-INFO}"
+      # Cluster settings (only used when QDRANT_COMMAND is set)
+      QDRANT__CLUSTER__ENABLED: "${QDRANT_CLUSTER_ENABLED:-false}"
+      QDRANT__CLUSTER__P2P__PORT: "6335"
+      QDRANT__CLUSTER__CONSENSUS__TICK_PERIOD_MS: "100"
+    # Cluster command (set in start-node*.sh for cluster mode)
+    # Leave empty for single-node development
+    command: ${QDRANT_COMMAND:-}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
+  # Qdrant Service (Rust microservice wrapper)
   qdrant-service:
+    # Development: build from source
+    # Production: use pre-built image
+    image: ${QDRANT_SERVICE_IMAGE:-}
     build:
       context: ./qdrant-service
       dockerfile: Dockerfile
     container_name: synaplan-qdrant-service
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "8090:8090"
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_healthy
     environment:
-      # Qdrant connection
-      - QDRANT_URL=http://qdrant:6334
-      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
-      - QDRANT_COLLECTION_NAME=user_memories
-      - QDRANT_VECTOR_DIMENSION=1024
-      
+      # Qdrant connection (via Docker network)
+      QDRANT_URL: http://qdrant:6334
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-user_memories}
+      QDRANT_VECTOR_DIMENSION: "${QDRANT_VECTOR_DIMENSION:-1024}"
       # Service config
-      - PORT=8090
-      - SERVICE_API_KEY=${QDRANT_SERVICE_API_KEY:-changeme-in-production}
-      - WEBHOOK_URL=${WEBHOOK_URL:-}
-      
+      PORT: "8090"
+      SERVICE_API_KEY: ${SERVICE_API_KEY:-changeme-in-production}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      # Embedding backend (cluster uses shared Ollama at 10.0.1.10)
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-ollama}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # Logging
-      - RUST_LOG=synaplan_qdrant_service=info,tower_http=info
-    
-    networks:
-      - synaplan-memories
-      - synaplan-network
-    
+      RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
       interval: 10s
@@ -54,10 +92,3 @@ services:
 volumes:
   qdrant_storage:
     driver: local
-
-networks:
-  synaplan-memories:
-    driver: bridge
-  synaplan-network:
-    external: true
-    name: synaplan_synaplan-network
