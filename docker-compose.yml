@@ -64,7 +64,7 @@ services:
         condition: service_started
     environment:
       # Qdrant connection (via Docker network)
-      QDRANT_URL: http://qdrant:6334
+      QDRANT_URL: http://docker-host:6334
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-user_memories}
       QDRANT_VECTOR_DIMENSION: "${QDRANT_VECTOR_DIMENSION:-1024}"
