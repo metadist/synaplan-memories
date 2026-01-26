@@ -16,9 +16,9 @@ echo "  Node IP: ${NODE_IP}"
 echo "  Role: Bootstrap (Leader)"
 
 # Verify .env exists
-if [ ! -f ".env" ]; then
-    echo "ERROR: .env not found!"
-    echo "Copy .env.example to .env and set SERVICE_API_KEY."
+if [ ! -f "qdrant-service/.env" ]; then
+    echo "ERROR: qdrant-service/.env not found!"
+    echo "Copy qdrant-service/.env.example to qdrant-service/.env and set SERVICE_API_KEY."
     exit 1
 fi
 
