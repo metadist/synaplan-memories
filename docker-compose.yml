@@ -64,7 +64,7 @@ services:
         condition: service_started
     environment:
       # Qdrant connection (via Docker network)
-      QDRANT_URL: http://docker-host:6334
+      QDRANT_URL: http://qdrant:6334
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-user_memories}
       QDRANT_VECTOR_DIMENSION: "${QDRANT_VECTOR_DIMENSION:-1024}"
@@ -72,10 +72,6 @@ services:
       PORT: "8090"
       SERVICE_API_KEY: ${SERVICE_API_KEY:-changeme-in-production}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
-      # Embedding backend (cluster uses shared Ollama at 10.0.1.10)
-      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-ollama}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       # Logging
       RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
     healthcheck:
