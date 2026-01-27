@@ -62,6 +62,11 @@ services:
     depends_on:
       qdrant:
         condition: service_started
+    extra_hosts:
+      # Allow access to Docker host (for host.docker.internal on Linux)
+      - "host.docker.internal:host-gateway"
+      # Allow access to internal network (Ollama server, etc.)
+      - "docker-host:host-gateway"
     environment:
       # Qdrant connection (via Docker network)
       QDRANT_URL: http://qdrant:6334
@@ -70,7 +75,6 @@ services:
       QDRANT_VECTOR_DIMENSION: "${QDRANT_VECTOR_DIMENSION:-1024}"
       # Service config
       PORT: "8090"
-      SERVICE_API_KEY: ${SERVICE_API_KEY:-changeme-in-production}
       WEBHOOK_URL: ${WEBHOOK_URL:-}
       # Logging
       RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
