@@ -78,6 +78,9 @@ pub struct UpsertMemoryRequest {
     #[schema(example = json!([0.1, 0.2, 0.3]))]
     pub vector: Vec<f32>,
     pub payload: MemoryPayload,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "feedback_false_positive")]
+    pub namespace: Option<String>,
 }
 
 /// Batch upsert multiple memories
@@ -111,6 +114,9 @@ pub struct SearchMemoriesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = "personal")]
     pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "feedback_false_positive")]
+    pub namespace: Option<String>,
     #[serde(default = "default_limit")]
     #[schema(example = 15, minimum = 1, maximum = 100)]
     pub limit: u64,
@@ -143,6 +149,9 @@ pub struct ScrollMemoriesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = "personal")]
     pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "feedback_false_positive")]
+    pub namespace: Option<String>,
     #[serde(default = "default_scroll_limit")]
     #[schema(example = 1000, minimum = 1, maximum = 10000)]
     pub limit: u64,

@@ -2,13 +2,17 @@ use crate::error::AppError;
 use crate::models::*;
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::header,
     response::IntoResponse,
     Json,
 };
 use tracing::info;
 use utoipa;
+#[derive(Debug, serde::Deserialize)]
+pub struct NamespaceQuery {
+    pub namespace: Option<String>,
+}
 
 /// Get service capabilities and configuration
 ///
@@ -81,7 +85,12 @@ pub async fn upsert_memory(
 
     state
         .qdrant
-        .upsert_memory(req.point_id.clone(), req.vector, req.payload)
+        .upsert_memory(
+            req.point_id.clone(),
+            req.vector,
+            req.payload,
+            req.namespace.as_deref(),
+        )
         .await?;
 
     // Track stats
@@ -105,7 +114,8 @@ pub async fn upsert_memory(
     path = "/memories/{point_id}",
     tag = "Memories",
     params(
-        ("point_id" = String, Path, description = "Unique memory ID (e.g., mem_1730_abc123)")
+        ("point_id" = String, Path, description = "Unique memory ID (e.g., mem_1730_abc123)"),
+        ("namespace" = Option<String>, Query, description = "Optional namespace for alternative collection")
     ),
     responses(
         (status = 200, description = "Memory found", body = MemoryResponse),
@@ -115,12 +125,13 @@ pub async fn upsert_memory(
 pub async fn get_memory(
     State(state): State<AppState>,
     Path(point_id): Path<String>,
+    Query(query): Query<NamespaceQuery>,
 ) -> Result<Json<MemoryResponse>, AppError> {
     info!("Getting memory: {}", point_id);
 
     let payload = state
         .qdrant
-        .get_memory(&point_id)
+        .get_memory(&point_id, query.namespace.as_deref())
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Memory not found: {}", point_id)))?;
 
@@ -141,7 +152,8 @@ pub async fn get_memory(
     path = "/memories/{point_id}",
     tag = "Memories",
     params(
-        ("point_id" = String, Path, description = "Unique memory ID to delete")
+        ("point_id" = String, Path, description = "Unique memory ID to delete"),
+        ("namespace" = Option<String>, Query, description = "Optional namespace for alternative collection")
     ),
     responses(
         (status = 200, description = "Memory deleted successfully", body = inline(Object), example = json!({
@@ -155,10 +167,14 @@ pub async fn get_memory(
 pub async fn delete_memory(
     State(state): State<AppState>,
     Path(point_id): Path<String>,
+    Query(query): Query<NamespaceQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     info!("Deleting memory: {}", point_id);
 
-    state.qdrant.delete_memory(&point_id).await?;
+    state
+        .qdrant
+        .delete_memory(&point_id, query.namespace.as_deref())
+        .await?;
 
     // Track stats
     state.stats.increment_deletes();
@@ -209,6 +225,7 @@ pub async fn search_memories(
             req.category,
             req.limit,
             req.min_score,
+            req.namespace.as_deref(),
         )
         .await?;
 
@@ -237,6 +254,9 @@ pub async fn search_memories(
     get,
     path = "/collection/info",
     tag = "Service Info",
+    params(
+        ("namespace" = Option<String>, Query, description = "Optional namespace for alternative collection")
+    ),
     responses(
         (status = 200, description = "Collection statistics", body = CollectionInfo),
         (status = 500, description = "Qdrant error")
@@ -244,9 +264,10 @@ pub async fn search_memories(
 )]
 pub async fn get_collection_info(
     State(state): State<AppState>,
+    Query(query): Query<NamespaceQuery>,
 ) -> Result<Json<CollectionInfo>, AppError> {
     let (status, points_count, vectors_count, indexed_vectors_count) =
-        state.qdrant.get_collection_info().await?;
+        state.qdrant.get_collection_info(query.namespace.as_deref()).await?;
 
     Ok(Json(CollectionInfo {
         status,
@@ -287,7 +308,7 @@ pub async fn scroll_memories(
 
     let results = state
         .qdrant
-        .scroll_memories(req.user_id, req.category, req.limit)
+        .scroll_memories(req.user_id, req.category, req.limit, req.namespace.as_deref())
         .await?;
 
     let memories: Vec<MemoryResponse> = results
@@ -358,7 +379,12 @@ pub async fn batch_upsert_memories(
     for point in req.points {
         match state
             .qdrant
-            .upsert_memory(point.point_id.clone(), point.vector, point.payload)
+            .upsert_memory(
+                point.point_id.clone(),
+                point.vector,
+                point.payload,
+                point.namespace.as_deref(),
+            )
             .await
         {
             Ok(_) => success_count += 1,

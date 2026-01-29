@@ -45,27 +45,31 @@ impl QdrantService {
     }
 
     pub async fn ensure_collection_exists(&self) -> Result<(), AppError> {
+        self.ensure_collection_exists_for(&self.collection_name).await
+    }
+
+    pub async fn ensure_collection_exists_for(&self, collection_name: &str) -> Result<(), AppError> {
         let collections = self.client.list_collections().await?;
 
         let exists = collections
             .collections
             .iter()
-            .any(|c| c.name == self.collection_name);
+            .any(|c| c.name == collection_name);
 
         if !exists {
-            info!("Creating collection '{}'", self.collection_name);
+            info!("Creating collection '{}'", collection_name);
 
             self.client
                 .create_collection(
-                    CreateCollectionBuilder::new(&self.collection_name).vectors_config(
+                    CreateCollectionBuilder::new(collection_name).vectors_config(
                         VectorParamsBuilder::new(self.vector_dimension, Distance::Cosine),
                     ),
                 )
                 .await?;
 
-            info!("Collection '{}' created successfully", self.collection_name);
+            info!("Collection '{}' created successfully", collection_name);
         } else {
-            debug!("Collection '{}' already exists", self.collection_name);
+            debug!("Collection '{}' already exists", collection_name);
         }
 
         Ok(())
@@ -76,6 +80,7 @@ impl QdrantService {
         point_id: String,
         vector: Vec<f32>,
         payload: MemoryPayload,
+        namespace: Option<&str>,
     ) -> Result<(), AppError> {
         if vector.len() != self.vector_dimension as usize {
             return Err(AppError::InvalidRequest(format!(
@@ -102,10 +107,13 @@ impl QdrantService {
 
         let point = PointStruct::new(pid, vector, payload_qdrant);
 
+        let collection_name = self.get_collection_name(namespace);
+        self.ensure_collection_exists_for(&collection_name).await?;
+
         // Use UpsertPointsBuilder
         self.client
             .upsert_points(
-                UpsertPointsBuilder::new(&self.collection_name, vec![point])
+                UpsertPointsBuilder::new(&collection_name, vec![point])
             )
             .await?;
 
@@ -114,17 +122,18 @@ impl QdrantService {
         Ok(())
     }
 
-    pub async fn get_memory(&self, point_id: &str) -> Result<Option<MemoryPayload>, AppError> {
+    pub async fn get_memory(&self, point_id: &str, namespace: Option<&str>) -> Result<Option<MemoryPayload>, AppError> {
         let numeric_id = string_to_point_id(point_id);
         let pid = PointId {
             point_id_options: Some(PointIdOptions::Num(numeric_id)),
         };
 
         // Use GetPointsBuilder
+        let collection_name = self.get_collection_name(namespace);
         let response = self
             .client
             .get_points(
-                GetPointsBuilder::new(&self.collection_name, vec![pid])
+                GetPointsBuilder::new(&collection_name, vec![pid])
                     .with_payload(true)
             )
             .await?;
@@ -153,6 +162,7 @@ impl QdrantService {
         category: Option<String>,
         limit: u64,
         min_score: f32,
+        namespace: Option<&str>,
     ) -> Result<Vec<(String, f32, MemoryPayload)>, AppError> {
         if query_vector.len() != self.vector_dimension as usize {
             return Err(AppError::InvalidRequest(format!(
@@ -177,10 +187,11 @@ impl QdrantService {
             ..Default::default()
         };
 
+        let collection_name = self.get_collection_name(namespace);
         let search_result = self
             .client
             .search_points(
-                SearchPointsBuilder::new(&self.collection_name, query_vector, limit)
+                SearchPointsBuilder::new(&collection_name, query_vector, limit)
                     .filter(filter)
                     .score_threshold(min_score)
                     .with_payload(true),
@@ -225,16 +236,17 @@ impl QdrantService {
         Ok(results)
     }
 
-    pub async fn delete_memory(&self, point_id: &str) -> Result<(), AppError> {
+    pub async fn delete_memory(&self, point_id: &str, namespace: Option<&str>) -> Result<(), AppError> {
         let numeric_id = string_to_point_id(point_id);
         let pid = PointId {
             point_id_options: Some(PointIdOptions::Num(numeric_id)),
         };
 
+        let collection_name = self.get_collection_name(namespace);
         // Use DeletePointsBuilder
         self.client
             .delete_points(
-                DeletePointsBuilder::new(&self.collection_name)
+                DeletePointsBuilder::new(&collection_name)
                     .points(vec![pid])
             )
             .await?;
@@ -254,8 +266,9 @@ impl QdrantService {
         }
     }
 
-    pub async fn get_collection_info(&self) -> Result<(String, u64, u64, u64), AppError> {
-        let response = self.client.collection_info(&self.collection_name).await?;
+    pub async fn get_collection_info(&self, namespace: Option<&str>) -> Result<(String, u64, u64, u64), AppError> {
+        let collection_name = self.get_collection_name(namespace);
+        let response = self.client.collection_info(&collection_name).await?;
 
         // In v1.16, the response has a 'result' field
         let info = response
@@ -280,6 +293,7 @@ impl QdrantService {
         user_id: i64,
         category: Option<String>,
         limit: u64,
+        namespace: Option<&str>,
     ) -> Result<Vec<(String, MemoryPayload)>, AppError> {
         // Build filter for user_id and optional category
         let mut must_conditions = vec![Condition::matches("user_id", user_id)];
@@ -297,10 +311,11 @@ impl QdrantService {
         };
 
         // Use scroll API to retrieve all matching points
+        let collection_name = self.get_collection_name(namespace);
         let scroll_result = self
             .client
             .scroll(
-                qdrant_client::qdrant::ScrollPointsBuilder::new(&self.collection_name)
+                qdrant_client::qdrant::ScrollPointsBuilder::new(&collection_name)
                     .filter(filter)
                     .limit(limit as u32)
                     .with_payload(true)
@@ -351,6 +366,36 @@ impl QdrantService {
         );
 
         Ok(results)
+    }
+
+    fn get_collection_name(&self, namespace: Option<&str>) -> String {
+        let namespace = namespace
+            .and_then(|value| {
+                let sanitized = Self::sanitize_namespace(value);
+                if sanitized.is_empty() {
+                    None
+                } else {
+                    Some(sanitized)
+                }
+            });
+
+        match namespace {
+            Some(ns) => format!("{}_{}", self.collection_name, ns),
+            None => self.collection_name.clone(),
+        }
+    }
+
+    fn sanitize_namespace(value: &str) -> String {
+        let mut output = String::with_capacity(value.len());
+        for ch in value.chars() {
+            if ch.is_ascii_alphanumeric() {
+                output.push(ch.to_ascii_lowercase());
+            } else if ch == '-' || ch == '_' {
+                output.push('_');
+            }
+        }
+
+        output.trim_matches('_').to_string()
     }
 }
 
