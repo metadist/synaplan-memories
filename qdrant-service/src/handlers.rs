@@ -3,7 +3,7 @@ use crate::models::*;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::header,
+    http::{header, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -443,7 +443,7 @@ pub async fn get_service_info(
 
     // Get Qdrant collection stats
     let (status, points_count, vectors_count, indexed_vectors_count) =
-        state.qdrant.get_collection_info().await?;
+        state.qdrant.get_collection_info(None).await?;
 
     // Get system info
     let version = env!("CARGO_PKG_VERSION");

@@ -410,7 +410,7 @@ async fn health_check(State(state): State<AppState>) -> Result<Json<serde_json::
     let healthy = state.qdrant.health_check().await?;
     
     // Get Qdrant stats for metrics
-    let (coll_status, points_count, vectors_count, _) = state.qdrant.get_collection_info().await.unwrap_or((
+    let (coll_status, points_count, vectors_count, _) = state.qdrant.get_collection_info(None).await.unwrap_or((
         "unknown".to_string(),
         0,
         0,

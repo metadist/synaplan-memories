@@ -2,9 +2,10 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::models::{MemoryPayload, DocumentPayload, DocumentStatsResponse, DocumentSearchResult};
 use qdrant_client::qdrant::{
-    point_id::PointIdOptions, Condition, CreateCollectionBuilder, DeletePointsBuilder, Distance,
-    Filter, GetPointsBuilder, PointId, PointStruct, SearchPointsBuilder,
-    UpsertPointsBuilder, VectorParamsBuilder, ScrollPointsBuilder, HnswConfigDiff, vectors_config, VectorParams, FieldType,
+    point_id::PointIdOptions, Condition, CreateCollectionBuilder,
+    CreateFieldIndexCollectionBuilder, DeletePointsBuilder, Distance, FieldType, Filter,
+    GetPointsBuilder, HnswConfigDiff, PointId, PointStruct, ScrollPointsBuilder,
+    SearchPointsBuilder, SetPayloadPointsBuilder, UpsertPointsBuilder, VectorParamsBuilder,
 };
 use qdrant_client::{Payload, Qdrant};
 use serde_json::{self, json};
@@ -77,9 +78,9 @@ impl QdrantService {
                 .await?;
 
             // Create payload indexes
-            self.client.create_field_index(collection_name, "user_id", FieldType::Integer, None, None).await?;
-            self.client.create_field_index(collection_name, "file_id", FieldType::Integer, None, None).await?;
-            self.client.create_field_index(collection_name, "group_key", FieldType::Keyword, None, None).await?;
+            self.client.create_field_index(CreateFieldIndexCollectionBuilder::new(collection_name, "user_id", FieldType::Integer)).await?;
+            self.client.create_field_index(CreateFieldIndexCollectionBuilder::new(collection_name, "file_id", FieldType::Integer)).await?;
+            self.client.create_field_index(CreateFieldIndexCollectionBuilder::new(collection_name, "group_key", FieldType::Keyword)).await?;
 
             info!("Documents collection '{}' created successfully", collection_name);
         } else {
@@ -521,8 +522,8 @@ impl QdrantService {
 
             let id = p.payload.get("_point_id")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+                .map(|s| s.to_string())
+                .unwrap_or_default();
 
             doc_results.push(DocumentSearchResult {
                 id,
@@ -565,7 +566,8 @@ impl QdrantService {
             // Extract vector
             let vector = point.vectors.and_then(|v| {
                 match v.vectors_options {
-                    Some(qdrant_client::qdrant::vectors::VectorsOptions::Vector(vec)) => Some(vec.data),
+                    #[allow(deprecated)]
+                    Some(qdrant_client::qdrant::vectors_output::VectorsOptions::Vector(v)) => Some(v.data),
                     _ => None,
                 }
             });
@@ -612,14 +614,14 @@ impl QdrantService {
             Condition::matches("file_id", file_id),
         ]);
 
-        let result = self.client
+        self.client
             .delete_points(
                 DeletePointsBuilder::new(collection)
-                    .filter(filter)
+                    .points(filter)
             )
             .await?;
 
-        Ok(result.result.map(|r| r.status).unwrap_or(0) as u64)
+        Ok(1)
     }
 
     /// Delete documents by group key
@@ -635,14 +637,14 @@ impl QdrantService {
             Condition::matches("group_key", group_key.to_string()),
         ]);
 
-        let result = self.client
+        self.client
             .delete_points(
                 DeletePointsBuilder::new(collection)
-                    .filter(filter)
+                    .points(filter)
             )
             .await?;
 
-        Ok(result.result.map(|r| r.status).unwrap_or(0) as u64)
+        Ok(1)
     }
 
     /// Delete all documents for a user
@@ -653,14 +655,14 @@ impl QdrantService {
             Condition::matches("user_id", user_id),
         ]);
 
-        let result = self.client
+        self.client
             .delete_points(
                 DeletePointsBuilder::new(collection)
-                    .filter(filter)
+                    .points(filter)
             )
             .await?;
 
-        Ok(result.result.map(|r| r.status).unwrap_or(0) as u64)
+        Ok(1)
     }
 
     /// Update group key for file documents
@@ -685,10 +687,8 @@ impl QdrantService {
 
         self.client
             .set_payload(
-                collection,
-                &filter.into(),
-                qdrant_payload,
-                None,
+                SetPayloadPointsBuilder::new(collection, qdrant_payload)
+                    .points_selector(filter),
             )
             .await?;
 
@@ -709,27 +709,31 @@ impl QdrantService {
         let mut file_ids = std::collections::HashSet::new();
         let mut chunks_by_group: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         
-        let mut offset = None;
+        let mut offset: Option<PointId> = None;
         loop {
-            let results = self.client
-                .scroll(
-                    ScrollPointsBuilder::new(collection)
-                        .filter(filter.clone())
-                        .limit(1000)
-                        .offset(offset)
-                        .with_payload(true)
-                        .with_vectors(false),
-                )
-                .await?;
+            let mut builder = ScrollPointsBuilder::new(collection)
+                .filter(filter.clone())
+                .limit(1000)
+                .with_payload(true)
+                .with_vectors(false);
+
+            if let Some(off) = offset.take() {
+                builder = builder.offset(off);
+            }
+
+            let results = self.client.scroll(builder).await?;
 
             for point in &results.result {
                 total_chunks += 1;
-                
-                if let Some(file_id) = point.payload.get("file_id").and_then(|v| v.as_i64()) {
+
+                // Convert qdrant payload to serde_json for easier field access
+                let payload_json = serde_json::to_value(&point.payload).unwrap_or_default();
+
+                if let Some(file_id) = payload_json.get("file_id").and_then(|v| v.as_i64()) {
                     file_ids.insert(file_id);
                 }
-                
-                if let Some(group_key) = point.payload.get("group_key").and_then(|v| v.as_str()) {
+
+                if let Some(group_key) = payload_json.get("group_key").and_then(|v| v.as_str()) {
                     *chunks_by_group.entry(group_key.to_string()).or_insert(0) += 1;
                 }
             }

@@ -352,6 +352,7 @@ mod tests {
             query_vector: vec![0.1; 1024],
             user_id: 1,
             category: None,
+            namespace: None,
             limit: default_limit(),
             min_score: default_min_score(),
         };
