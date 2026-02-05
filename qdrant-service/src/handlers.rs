@@ -469,3 +469,286 @@ pub async fn get_service_info(
         }
     })))
 }
+
+/// Upsert a single document chunk
+#[utoipa::path(
+    post,
+    path = "/documents",
+    request_body = UpsertDocumentRequest,
+    responses(
+        (status = 200, description = "Document upserted successfully"),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn upsert_document(
+    State(state): State<AppState>,
+    Json(req): Json<UpsertDocumentRequest>,
+) -> Result<StatusCode, AppError> {
+    // Validate vector dimension
+    if req.vector.len() != 1024 {
+        return Err(AppError::InvalidRequest(format!(
+            "Vector must have exactly 1024 dimensions, got {}",
+            req.vector.len()
+        )));
+    }
+
+    state.qdrant.upsert_document(&req.point_id, &req.vector, &req.payload).await?;
+    
+    Ok(StatusCode::OK)
+}
+
+/// Batch upsert document chunks
+#[utoipa::path(
+    post,
+    path = "/documents/batch",
+    request_body = BatchUpsertDocumentsRequest,
+    responses(
+        (status = 200, description = "Batch upsert completed", body = BatchUpsertResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn batch_upsert_documents(
+    State(state): State<AppState>,
+    Json(req): Json<BatchUpsertDocumentsRequest>,
+) -> Result<Json<BatchUpsertResponse>, AppError> {
+    if req.documents.len() > 100 {
+        return Err(AppError::InvalidRequest("Maximum 100 documents per batch".into()));
+    }
+
+    let mut success_count = 0;
+    let mut failed_count = 0;
+    let mut errors = Vec::new();
+
+    for doc in &req.documents {
+        if doc.vector.len() != 1024 {
+            failed_count += 1;
+            errors.push(format!("Document {}: invalid vector dimension", doc.point_id));
+            continue;
+        }
+
+        match state.qdrant.upsert_document(&doc.point_id, &doc.vector, &doc.payload).await {
+            Ok(_) => success_count += 1,
+            Err(e) => {
+                failed_count += 1;
+                errors.push(format!("Document {}: {}", doc.point_id, e));
+            }
+        }
+    }
+
+    Ok(Json(BatchUpsertResponse {
+        success_count,
+        failed_count,
+        errors,
+    }))
+}
+
+/// Search documents by vector similarity
+#[utoipa::path(
+    post,
+    path = "/documents/search",
+    request_body = SearchDocumentsRequest,
+    responses(
+        (status = 200, description = "Search results", body = Vec<DocumentSearchResult>),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn search_documents(
+    State(state): State<AppState>,
+    Json(req): Json<SearchDocumentsRequest>,
+) -> Result<Json<Vec<DocumentSearchResult>>, AppError> {
+    if req.vector.len() != 1024 {
+        return Err(AppError::InvalidRequest(format!(
+            "Vector must have exactly 1024 dimensions, got {}",
+            req.vector.len()
+        )));
+    }
+
+    let results = state.qdrant.search_documents(
+        &req.vector,
+        req.user_id,
+        req.group_key.as_deref(),
+        req.limit,
+        req.min_score,
+    ).await?;
+
+    Ok(Json(results))
+}
+
+/// Get document by ID
+#[utoipa::path(
+    get,
+    path = "/documents/{point_id}",
+    params(
+        ("point_id" = String, Path, description = "Document point ID")
+    ),
+    responses(
+        (status = 200, description = "Document found", body = DocumentSearchResult),
+        (status = 404, description = "Document not found"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn get_document(
+    State(state): State<AppState>,
+    Path(point_id): Path<String>,
+) -> Result<Json<DocumentSearchResult>, AppError> {
+    let doc = state.qdrant.get_document(&point_id).await?
+        .ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+    
+    Ok(Json(doc))
+}
+
+/// Delete document by ID
+#[utoipa::path(
+    delete,
+    path = "/documents/{point_id}",
+    params(
+        ("point_id" = String, Path, description = "Document point ID")
+    ),
+    responses(
+        (status = 200, description = "Document deleted"),
+        (status = 404, description = "Document not found"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn delete_document(
+    State(state): State<AppState>,
+    Path(point_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    state.qdrant.delete_document(&point_id).await?;
+    Ok(StatusCode::OK)
+}
+
+/// Delete all documents for a file
+#[utoipa::path(
+    post,
+    path = "/documents/delete-by-file",
+    request_body = DeleteByFileRequest,
+    responses(
+        (status = 200, description = "Documents deleted", body = u64),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn delete_by_file(
+    State(state): State<AppState>,
+    Json(req): Json<DeleteByFileRequest>,
+) -> Result<Json<u64>, AppError> {
+    let deleted = state.qdrant.delete_documents_by_file(req.user_id, req.file_id).await?;
+    Ok(Json(deleted))
+}
+
+/// Delete all documents for a group key
+#[utoipa::path(
+    post,
+    path = "/documents/delete-by-group",
+    request_body = DeleteByGroupKeyRequest,
+    responses(
+        (status = 200, description = "Documents deleted", body = u64),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn delete_by_group_key(
+    State(state): State<AppState>,
+    Json(req): Json<DeleteByGroupKeyRequest>,
+) -> Result<Json<u64>, AppError> {
+    let deleted = state.qdrant.delete_documents_by_group_key(req.user_id, &req.group_key).await?;
+    Ok(Json(deleted))
+}
+
+/// Delete all documents for a user
+#[utoipa::path(
+    delete,
+    path = "/documents/user/{user_id}",
+    params(
+        ("user_id" = i64, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "All user documents deleted", body = u64),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn delete_all_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<i64>,
+) -> Result<Json<u64>, AppError> {
+    let deleted = state.qdrant.delete_all_documents_for_user(user_id).await?;
+    Ok(Json(deleted))
+}
+
+/// Update group key for all chunks of a file
+#[utoipa::path(
+    post,
+    path = "/documents/update-group-key",
+    request_body = UpdateGroupKeyRequest,
+    responses(
+        (status = 200, description = "Group key updated", body = u64),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn update_group_key(
+    State(state): State<AppState>,
+    Json(req): Json<UpdateGroupKeyRequest>,
+) -> Result<Json<u64>, AppError> {
+    let updated = state.qdrant.update_document_group_key(
+        req.user_id,
+        req.file_id,
+        &req.new_group_key,
+    ).await?;
+    Ok(Json(updated))
+}
+
+/// Get document statistics for a user
+#[utoipa::path(
+    get,
+    path = "/documents/stats/{user_id}",
+    params(
+        ("user_id" = i64, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "Document statistics", body = DocumentStatsResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn get_document_stats(
+    State(state): State<AppState>,
+    Path(user_id): Path<i64>,
+) -> Result<Json<DocumentStatsResponse>, AppError> {
+    let stats = state.qdrant.get_document_stats(user_id).await?;
+    Ok(Json(stats))
+}
+
+/// Get distinct group keys for a user
+#[utoipa::path(
+    get,
+    path = "/documents/groups/{user_id}",
+    params(
+        ("user_id" = i64, Path, description = "User ID")
+    ),
+    responses(
+        (status = 200, description = "Group keys", body = Vec<String>),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn get_group_keys(
+    State(state): State<AppState>,
+    Path(user_id): Path<i64>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let groups = state.qdrant.get_document_group_keys(user_id).await?;
+    Ok(Json(groups))
+}
