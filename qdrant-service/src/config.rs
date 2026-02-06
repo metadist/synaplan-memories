@@ -14,6 +14,7 @@ pub struct Config {
     pub webhook_url: Option<String>,
     pub enable_daily_stats: bool,
     pub stats_interval_hours: u64,
+    pub documents_collection_name: String,
 }
 
 impl Config {
@@ -24,6 +25,8 @@ impl Config {
             qdrant_api_key: env::var("QDRANT_API_KEY").ok(),
             collection_name: env::var("QDRANT_COLLECTION_NAME")
                 .unwrap_or_else(|_| "user_memories".to_string()),
+            documents_collection_name: env::var("QDRANT_DOCUMENTS_COLLECTION_NAME")
+                .unwrap_or_else(|_| "user_documents".to_string()),
             vector_dimension: env::var("QDRANT_VECTOR_DIMENSION")
                 .unwrap_or_else(|_| "1024".to_string())
                 .parse()
@@ -66,6 +69,7 @@ impl Config {
             webhook_url: None,
             enable_daily_stats: false,
             stats_interval_hours: 24,
+            documents_collection_name: "test_documents".to_string(),
         }
     }
 }
@@ -81,6 +85,7 @@ mod tests {
         env::remove_var("QDRANT_URL");
         env::remove_var("QDRANT_API_KEY");
         env::remove_var("QDRANT_COLLECTION_NAME");
+        env::remove_var("QDRANT_DOCUMENTS_COLLECTION_NAME");
         env::remove_var("QDRANT_VECTOR_DIMENSION");
         env::remove_var("PORT");
 
@@ -89,6 +94,7 @@ mod tests {
         assert_eq!(config.qdrant_url, "http://localhost:6334");
         assert_eq!(config.qdrant_api_key, None);
         assert_eq!(config.collection_name, "user_memories");
+        assert_eq!(config.documents_collection_name, "user_documents");
         assert_eq!(config.vector_dimension, 1024);
         assert_eq!(config.port, 8090);
     }
@@ -98,6 +104,7 @@ mod tests {
         env::set_var("QDRANT_URL", "http://custom:6334");
         env::set_var("QDRANT_API_KEY", "test-key");
         env::set_var("QDRANT_COLLECTION_NAME", "test_collection");
+        env::set_var("QDRANT_DOCUMENTS_COLLECTION_NAME", "test_docs");
         env::set_var("QDRANT_VECTOR_DIMENSION", "512");
         env::set_var("PORT", "9000");
 
@@ -106,6 +113,7 @@ mod tests {
         assert_eq!(config.qdrant_url, "http://custom:6334");
         assert_eq!(config.qdrant_api_key, Some("test-key".to_string()));
         assert_eq!(config.collection_name, "test_collection");
+        assert_eq!(config.documents_collection_name, "test_docs");
         assert_eq!(config.vector_dimension, 512);
         assert_eq!(config.port, 9000);
 
@@ -113,6 +121,7 @@ mod tests {
         env::remove_var("QDRANT_URL");
         env::remove_var("QDRANT_API_KEY");
         env::remove_var("QDRANT_COLLECTION_NAME");
+        env::remove_var("QDRANT_DOCUMENTS_COLLECTION_NAME");
         env::remove_var("QDRANT_VECTOR_DIMENSION");
         env::remove_var("PORT");
     }

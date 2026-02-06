@@ -189,6 +189,118 @@ pub struct BatchError {
     pub error: String,
 }
 
+/// Document chunk payload stored in Qdrant
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DocumentPayload {
+    /// User ID for multi-tenant isolation
+    pub user_id: i64,
+    /// Reference to source file (BFILES.BID)
+    pub file_id: i64,
+    /// Grouping key (e.g., "WIDGET:xxx", "TASKPROMPT:xxx", "DEFAULT")
+    pub group_key: String,
+    /// File type identifier
+    pub file_type: i32,
+    /// Chunk position in file
+    pub chunk_index: i32,
+    /// Source line start
+    pub start_line: i32,
+    /// Source line end  
+    pub end_line: i32,
+    /// Chunk text content
+    pub text: String,
+    /// Unix timestamp
+    pub created: i64,
+}
+
+/// Request to upsert a document chunk
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpsertDocumentRequest {
+    /// Unique point ID (e.g., "doc_1_123_0")
+    pub point_id: String,
+    /// Vector embedding (must be exactly 1024 dimensions)
+    pub vector: Vec<f32>,
+    /// Document payload
+    pub payload: DocumentPayload,
+}
+
+/// Request for batch document upsert
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct BatchUpsertDocumentsRequest {
+    /// Array of documents to upsert (max 100)
+    pub documents: Vec<UpsertDocumentRequest>,
+}
+
+/// Response for batch operations
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BatchUpsertResponse {
+    pub success_count: usize,
+    pub failed_count: usize,
+    pub errors: Vec<String>,
+}
+
+/// Request to search documents
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct SearchDocumentsRequest {
+    /// Query vector (must be exactly 1024 dimensions)
+    pub vector: Vec<f32>,
+    /// User ID (required for isolation)
+    pub user_id: i64,
+    /// Optional group key filter
+    #[serde(default)]
+    pub group_key: Option<String>,
+    /// Maximum results (default: 10)
+    #[serde(default = "default_limit")]
+    pub limit: u64,
+    /// Minimum similarity score (default: 0.3)
+    #[serde(default = "default_min_score")]
+    pub min_score: f32,
+}
+
+/// Search result
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DocumentSearchResult {
+    /// Point ID
+    pub id: String,
+    /// Similarity score (0.0 - 1.0)
+    pub score: f32,
+    /// Document payload
+    pub payload: DocumentPayload,
+    /// Vector (optional, only returned by get_document)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector: Option<Vec<f32>>,
+}
+
+/// Request to delete documents by file
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeleteByFileRequest {
+    pub user_id: i64,
+    pub file_id: i64,
+}
+
+/// Request to delete documents by group key
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeleteByGroupKeyRequest {
+    pub user_id: i64,
+    pub group_key: String,
+}
+
+/// Request to update group key
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateGroupKeyRequest {
+    pub user_id: i64,
+    pub file_id: i64,
+    pub new_group_key: String,
+}
+
+/// Document statistics response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct DocumentStatsResponse {
+    pub total_chunks: u64,
+    pub total_files: u64,
+    pub total_groups: u64,
+    pub chunks_by_group: std::collections::HashMap<String, u64>,
+}
+
 // Default functions
 #[inline]
 const fn default_limit() -> u64 {
@@ -240,6 +352,7 @@ mod tests {
             query_vector: vec![0.1; 1024],
             user_id: 1,
             category: None,
+            namespace: None,
             limit: default_limit(),
             min_score: default_min_score(),
         };

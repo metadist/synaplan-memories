@@ -15,7 +15,7 @@
 services:
   # Qdrant Vector Database
   qdrant:
-    image: qdrant/qdrant:v1.12.5
+    image: qdrant/qdrant:v1.13.0
     container_name: synaplan-qdrant
     restart: unless-stopped
     ports:

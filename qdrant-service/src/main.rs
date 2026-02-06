@@ -56,6 +56,18 @@ use stats::StatsTracker;
         handlers::scroll_memories,
         handlers::batch_upsert_memories,
         handlers::get_service_info,
+        // Document endpoints
+        handlers::upsert_document,
+        handlers::batch_upsert_documents,
+        handlers::search_documents,
+        handlers::get_document,
+        handlers::delete_document,
+        handlers::delete_by_file,
+        handlers::delete_by_group_key,
+        handlers::delete_all_for_user,
+        handlers::update_group_key,
+        handlers::get_document_stats,
+        handlers::get_group_keys,
     ),
     components(schemas(
         models::ServiceCapabilities,
@@ -72,10 +84,22 @@ use stats::StatsTracker;
         models::CollectionInfo,
         models::BatchOperationResponse,
         models::BatchError,
+        // Document schemas
+        models::DocumentPayload,
+        models::UpsertDocumentRequest,
+        models::BatchUpsertDocumentsRequest,
+        models::BatchUpsertResponse,
+        models::SearchDocumentsRequest,
+        models::DocumentSearchResult,
+        models::DeleteByFileRequest,
+        models::DeleteByGroupKeyRequest,
+        models::UpdateGroupKeyRequest,
+        models::DocumentStatsResponse,
     )),
     tags(
         (name = "Service Info", description = "Service capabilities, version, and statistics"),
-        (name = "Memories", description = "CRUD operations for memory storage and search")
+        (name = "Memories", description = "CRUD operations for memory storage and search"),
+        (name = "documents", description = "CRUD operations for document chunk storage and search")
     )
 )]
 struct ApiDoc;
@@ -144,7 +168,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Ensure collection exists
     qdrant.ensure_collection_exists().await?;
-    info!("Collection '{}' is ready", config.collection_name);
+    info!("Collections ready");
 
     // Send startup notification
     alerts
@@ -178,6 +202,18 @@ async fn main() -> anyhow::Result<()> {
         .route("/memories/scroll", post(handlers::scroll_memories))
         .route("/collection/info", get(handlers::get_collection_info))
         .route("/service/info", get(handlers::get_service_info))
+        // Document routes
+        .route("/documents", post(handlers::upsert_document))
+        .route("/documents/batch", post(handlers::batch_upsert_documents))
+        .route("/documents/search", post(handlers::search_documents))
+        .route("/documents/:point_id", get(handlers::get_document))
+        .route("/documents/:point_id", delete(handlers::delete_document))
+        .route("/documents/delete-by-file", post(handlers::delete_by_file))
+        .route("/documents/delete-by-group", post(handlers::delete_by_group_key))
+        .route("/documents/user/:user_id", delete(handlers::delete_all_for_user))
+        .route("/documents/update-group-key", post(handlers::update_group_key))
+        .route("/documents/stats/:user_id", get(handlers::get_document_stats))
+        .route("/documents/groups/:user_id", get(handlers::get_group_keys))
         .route_layer(axum::middleware::from_fn_with_state(
             auth_state.clone(),
             auth_middleware,
@@ -374,7 +410,7 @@ async fn health_check(State(state): State<AppState>) -> Result<Json<serde_json::
     let healthy = state.qdrant.health_check().await?;
     
     // Get Qdrant stats for metrics
-    let (coll_status, points_count, vectors_count, _) = state.qdrant.get_collection_info().await.unwrap_or((
+    let (coll_status, points_count, vectors_count, _) = state.qdrant.get_collection_info(None).await.unwrap_or((
         "unknown".to_string(),
         0,
         0,
