@@ -292,6 +292,13 @@ pub struct UpdateGroupKeyRequest {
     pub new_group_key: String,
 }
 
+/// Per-file chunk info in stats response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FileChunkInfo {
+    pub chunks: u64,
+    pub group_key: Option<String>,
+}
+
 /// Document statistics response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DocumentStatsResponse {
@@ -299,6 +306,8 @@ pub struct DocumentStatsResponse {
     pub total_files: u64,
     pub total_groups: u64,
     pub chunks_by_group: std::collections::HashMap<String, u64>,
+    /// Per-file breakdown: file_id -> { chunks, group_key }
+    pub chunks_by_file: std::collections::HashMap<i64, FileChunkInfo>,
 }
 
 // Default functions

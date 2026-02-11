@@ -705,10 +705,13 @@ impl QdrantService {
             Condition::matches("user_id", user_id),
         ]);
 
+        use crate::models::FileChunkInfo;
+
         let mut total_chunks = 0u64;
         let mut file_ids = std::collections::HashSet::new();
         let mut chunks_by_group: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        
+        let mut chunks_by_file: std::collections::HashMap<i64, (u64, Option<String>)> = std::collections::HashMap::new();
+
         let mut offset: Option<PointId> = None;
         loop {
             let mut builder = ScrollPointsBuilder::new(collection)
@@ -729,12 +732,20 @@ impl QdrantService {
                 // Convert qdrant payload to serde_json for easier field access
                 let payload_json = serde_json::to_value(&point.payload).unwrap_or_default();
 
-                if let Some(file_id) = payload_json.get("file_id").and_then(|v| v.as_i64()) {
-                    file_ids.insert(file_id);
+                let file_id = payload_json.get("file_id").and_then(|v| v.as_i64());
+                let group_key = payload_json.get("group_key").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                if let Some(fid) = file_id {
+                    file_ids.insert(fid);
+                    let entry = chunks_by_file.entry(fid).or_insert((0, None));
+                    entry.0 += 1;
+                    if entry.1.is_none() {
+                        entry.1 = group_key.clone();
+                    }
                 }
 
-                if let Some(group_key) = payload_json.get("group_key").and_then(|v| v.as_str()) {
-                    *chunks_by_group.entry(group_key.to_string()).or_insert(0) += 1;
+                if let Some(ref gk) = group_key {
+                    *chunks_by_group.entry(gk.clone()).or_insert(0) += 1;
                 }
             }
 
@@ -744,11 +755,17 @@ impl QdrantService {
             }
         }
 
+        let chunks_by_file_info = chunks_by_file
+            .into_iter()
+            .map(|(fid, (chunks, gk))| (fid, FileChunkInfo { chunks, group_key: gk }))
+            .collect();
+
         Ok(DocumentStatsResponse {
             total_chunks,
             total_files: file_ids.len() as u64,
             total_groups: chunks_by_group.len() as u64,
             chunks_by_group,
+            chunks_by_file: chunks_by_file_info,
         })
     }
 
