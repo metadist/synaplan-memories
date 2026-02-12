@@ -25,7 +25,9 @@ declare -A NODES=(
 )
 
 COLLECTION="user_memories"
-TEST_POINT_ID="test-replication-$(date +%s)"
+# Qdrant requires point IDs to be either unsigned 64-bit integers or UUIDs.
+# Use a UUID so the test point is clearly identifiable as a test.
+TEST_POINT_ID=$(python3 -c "import uuid; print(uuid.uuid4())" 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "00000000-0000-4000-a000-$(date +%s%N | cut -c1-12)")
 VECTOR_DIM=1024
 
 echo -e "${BLUE}=== Qdrant Replication Test ===${NC}\n"
@@ -40,10 +42,10 @@ remote_exec() {
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$node" "$@" 2>/dev/null
 }
 
-# Generate a random vector
+# Generate a random vector (1024 dimensions)
 generate_vector() {
     python3 -c "import random; print([round(random.uniform(-1, 1), 4) for _ in range($VECTOR_DIM)])" 2>/dev/null || \
-    awk -v dim=$VECTOR_DIM 'BEGIN{printf "["; for(i=1;i<=dim;i++){printf "%.4f%s", rand()*2-1, (i<dim?",":"]}"); }'
+    awk -v dim=$VECTOR_DIM 'BEGIN{ srand(); printf "["; for(i=1;i<=dim;i++){ printf "%.4f%s", rand()*2-1, (i<dim ? "," : "") } printf "]" }'
 }
 
 # Check if collection exists
@@ -85,12 +87,13 @@ INSERT_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-insert_result=$(remote_exec "web1" "curl -sf -X PUT 'http://localhost:6333/collections/$COLLECTION/points?wait=true' -H 'Content-Type: application/json' -d '$INSERT_PAYLOAD'" || echo "FAILED")
+insert_result=$(remote_exec "web1" "curl -s -X PUT 'http://localhost:6333/collections/$COLLECTION/points?wait=true' -H 'Content-Type: application/json' -d '$INSERT_PAYLOAD'" || echo "CURL_FAILED")
 
-if [[ "$insert_result" == *"completed"* ]] || [[ "$insert_result" == *"status"* ]]; then
+if [[ "$insert_result" == *"completed"* ]] || [[ "$insert_result" == *'"status":"ok"'* ]]; then
     echo -e "${GREEN}✓${NC} Point inserted successfully"
 else
-    echo -e "${RED}✗${NC} Failed to insert point: $insert_result"
+    echo -e "${RED}✗${NC} Failed to insert point"
+    echo "   Response: ${insert_result:0:300}"
     exit 1
 fi
 
