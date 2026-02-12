@@ -680,6 +680,7 @@ impl QdrantService {
         ]);
 
         // Qdrant's set_payload to update group_key
+        // Use wait=true to ensure the update is visible to subsequent reads
         let payload = json!({"group_key": new_group_key});
         let payload_map = payload.as_object().unwrap().clone();
         let qdrant_payload = Payload::try_from(serde_json::Value::Object(payload_map))
@@ -688,12 +689,25 @@ impl QdrantService {
         self.client
             .set_payload(
                 SetPayloadPointsBuilder::new(collection, qdrant_payload)
-                    .points_selector(filter),
+                    .points_selector(filter)
+                    .wait(true),
             )
             .await?;
 
-        // Return count (estimate, as Qdrant doesn't return count for set_payload)
-        Ok(1) 
+        // Count actual documents that match (for accurate return value)
+        let count_filter = Filter::must(vec![
+            Condition::matches("user_id", user_id),
+            Condition::matches("file_id", file_id),
+        ]);
+        let count_result = self.client
+            .count(
+                qdrant_client::qdrant::CountPointsBuilder::new(collection)
+                    .filter(count_filter)
+                    .exact(true),
+            )
+            .await?;
+
+        Ok(count_result.result.map(|r| r.count).unwrap_or(0))
     }
 
     /// Get document statistics
@@ -739,7 +753,10 @@ impl QdrantService {
                     file_ids.insert(fid);
                     let entry = chunks_by_file.entry(fid).or_insert((0, None));
                     entry.0 += 1;
-                    if entry.1.is_none() {
+                    // Always update group_key to the latest seen value.
+                    // After updateGroupKey, all chunks for a file should have the same
+                    // group_key, so last-seen equals the current value.
+                    if group_key.is_some() {
                         entry.1 = group_key.clone();
                     }
                 }
@@ -767,6 +784,52 @@ impl QdrantService {
             chunks_by_group,
             chunks_by_file: chunks_by_file_info,
         })
+    }
+
+    /// Get files with chunks for a specific group key
+    /// More efficient than get_document_stats when only one group is needed
+    pub async fn get_files_by_group(
+        &self,
+        user_id: i64,
+        group_key: &str,
+    ) -> Result<std::collections::HashMap<i64, u64>, AppError> {
+        let collection = &self.documents_collection_name;
+
+        let filter = Filter::must(vec![
+            Condition::matches("user_id", user_id),
+            Condition::matches("group_key", group_key.to_string()),
+        ]);
+
+        let mut files: std::collections::HashMap<i64, u64> = std::collections::HashMap::new();
+        let mut offset: Option<PointId> = None;
+
+        loop {
+            let mut builder = ScrollPointsBuilder::new(collection)
+                .filter(filter.clone())
+                .limit(1000)
+                .with_payload(true)
+                .with_vectors(false);
+
+            if let Some(off) = offset.take() {
+                builder = builder.offset(off);
+            }
+
+            let results = self.client.scroll(builder).await?;
+
+            for point in &results.result {
+                let payload_json = serde_json::to_value(&point.payload).unwrap_or_default();
+                if let Some(fid) = payload_json.get("file_id").and_then(|v| v.as_i64()) {
+                    *files.entry(fid).or_insert(0) += 1;
+                }
+            }
+
+            offset = results.next_page_offset;
+            if offset.is_none() || results.result.is_empty() {
+                break;
+            }
+        }
+
+        Ok(files)
     }
 
     /// Get distinct group keys

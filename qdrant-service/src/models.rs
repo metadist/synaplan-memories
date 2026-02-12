@@ -292,6 +292,19 @@ pub struct UpdateGroupKeyRequest {
     pub new_group_key: String,
 }
 
+/// Request to get files by group key
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct FilesByGroupRequest {
+    pub user_id: i64,
+    pub group_key: String,
+}
+
+/// Response for files by group key: map of file_id -> chunk_count
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FilesByGroupResponse {
+    pub files: std::collections::HashMap<i64, u64>,
+}
+
 /// Per-file chunk info in stats response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct FileChunkInfo {

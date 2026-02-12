@@ -752,3 +752,23 @@ pub async fn get_group_keys(
     let groups = state.qdrant.get_document_group_keys(user_id).await?;
     Ok(Json(groups))
 }
+
+/// Get files with chunk counts for a specific group key
+#[utoipa::path(
+    post,
+    path = "/documents/files-by-group",
+    request_body = FilesByGroupRequest,
+    responses(
+        (status = 200, description = "Files in group with chunk counts", body = FilesByGroupResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
+    ),
+    tag = "documents"
+)]
+pub async fn get_files_by_group(
+    State(state): State<AppState>,
+    Json(req): Json<FilesByGroupRequest>,
+) -> Result<Json<FilesByGroupResponse>, AppError> {
+    let files = state.qdrant.get_files_by_group(req.user_id, &req.group_key).await?;
+    Ok(Json(FilesByGroupResponse { files }))
+}

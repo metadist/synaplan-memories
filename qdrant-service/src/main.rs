@@ -214,6 +214,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/documents/update-group-key", post(handlers::update_group_key))
         .route("/documents/stats/:user_id", get(handlers::get_document_stats))
         .route("/documents/groups/:user_id", get(handlers::get_group_keys))
+        .route("/documents/files-by-group", post(handlers::get_files_by_group))
         .route_layer(axum::middleware::from_fn_with_state(
             auth_state.clone(),
             auth_middleware,
