@@ -41,10 +41,11 @@ export QDRANT_COMMAND="./qdrant --uri http://${NODE_IP}:6335"
 export QDRANT_STORAGE_PATH=/qdrant/storage
 export OLLAMA_BASE_URL=http://10.0.1.10:11434
 
-# Don't expose REST API to all interfaces in production
-export QDRANT_REST_PORT=127.0.0.1:6333
+# Bind REST API to internal network IP (not all interfaces)
+export QDRANT_REST_PORT=${NODE_IP}:6333
 
 echo "  Qdrant Storage: /qdrant/storage (local)"
+echo "  REST API: http://${NODE_IP}:6333"
 
 # Build and start (pulls qdrant image, builds qdrant-service from source)
 # Use --force-recreate to ensure containers are refreshed
@@ -55,9 +56,9 @@ echo "Waiting for Qdrant to start..."
 sleep 10
 
 # Check status
-if curl -sf http://localhost:6333/cluster > /dev/null 2>&1; then
+if curl -sf "http://${NODE_IP}:6333/cluster" > /dev/null 2>&1; then
     echo "Qdrant cluster status:"
-    curl -s http://localhost:6333/cluster | jq -r '.result.status // "unknown"' 2>/dev/null || echo "(install jq for formatted output)"
+    curl -s "http://${NODE_IP}:6333/cluster" | jq -r '.result.status // "unknown"' 2>/dev/null || echo "(install jq for formatted output)"
 else
     echo "Warning: Could not check cluster status. Check logs:"
     echo "  docker compose logs qdrant"

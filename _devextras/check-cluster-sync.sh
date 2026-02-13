@@ -25,8 +25,9 @@ echo -e "${BLUE}=== Qdrant Cluster Synchronization Check ===${NC}\n"
 # Function to fetch metrics from a node
 fetch_metrics() {
     local node_name=$1
+    local node_ip="${NODES[$node_name]}"
     local metrics=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" \
-        "curl -sf http://localhost:6333/metrics 2>/dev/null" 2>/dev/null || echo "")
+        "curl -sf http://${node_ip}:6333/metrics 2>/dev/null" 2>/dev/null || echo "")
     echo "$metrics"
 }
 

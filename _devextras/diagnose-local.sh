@@ -7,9 +7,11 @@
 #   - API key configuration
 #   - Common issues
 #
-# Usage: cd /netroot/synaplanCluster/synaplan-memories && ./diagnose-local.sh
+# Usage: cd /netroot/synaplanCluster/synaplan-memories && ./diagnose-local.sh [QDRANT_HOST]
 
 set -euo pipefail
+
+QDRANT_HOST="${1:-10.0.0.2}"
 
 # Colors
 RED='\033[0;31m'
@@ -64,7 +66,7 @@ echo ""
 echo -e "${BLUE}[2/7] Qdrant Health${NC}"
 #------------------------------------------------------------------------------
 
-qdrant_health=$(curl -sf http://localhost:6333/healthz 2>/dev/null || echo "FAILED")
+qdrant_health=$(curl -sf http://${QDRANT_HOST}:6333/healthz 2>/dev/null || echo "FAILED")
 if [[ "$qdrant_health" == *"ok"* ]] || [[ "$qdrant_health" != "FAILED" ]]; then
     echo -e "  ${GREEN}✓${NC} Qdrant REST API: OK"
 else
@@ -85,7 +87,7 @@ echo ""
 echo -e "${BLUE}[3/7] Cluster Status${NC}"
 #------------------------------------------------------------------------------
 
-cluster_json=$(curl -sf http://localhost:6333/cluster 2>/dev/null || echo "{}")
+cluster_json=$(curl -sf http://${QDRANT_HOST}:6333/cluster 2>/dev/null || echo "{}")
 if [[ "$cluster_json" != "{}" ]]; then
     peer_count=$(echo "$cluster_json" | jq -r '.result.peers | keys | length' 2>/dev/null || echo "0")
     cluster_status=$(echo "$cluster_json" | jq -r '.result.status // "unknown"' 2>/dev/null)

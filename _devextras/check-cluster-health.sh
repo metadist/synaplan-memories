@@ -37,7 +37,7 @@ check_node() {
     
     # Check Qdrant health endpoints
     echo -n "  Health endpoints: "
-    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" "curl -sf http://localhost:6333/healthz > /dev/null 2>&1" 2>/dev/null; then
+    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" "curl -sf http://${node_ip}:6333/healthz > /dev/null 2>&1" 2>/dev/null; then
         echo -e "${GREEN}✓${NC}"
     else
         echo -e "${RED}✗${NC}"
@@ -54,7 +54,7 @@ check_node() {
     # Get cluster status
     echo -n "  Cluster status: "
     local cluster_status=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" \
-        "curl -sf http://localhost:6333/cluster 2>/dev/null" 2>/dev/null || echo "")
+        "curl -sf http://${node_ip}:6333/cluster 2>/dev/null" 2>/dev/null || echo "")
     
     if [ -z "$cluster_status" ]; then
         echo -e "${RED}✗ Cannot fetch${NC}"

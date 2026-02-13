@@ -88,7 +88,7 @@ sep
 
 vals=()
 for node in "${NODES[@]}"; do
-    peers=$(remote_exec "$node" "curl -sf http://localhost:6333/cluster 2>/dev/null | jq -r '.result.peers | keys | length' 2>/dev/null")
+    peers=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/cluster 2>/dev/null | jq -r '.result.peers | keys | length' 2>/dev/null")
     [[ -z "$peers" ]] && peers="ERR"
     vals+=("$peers")
 done
@@ -96,21 +96,21 @@ print_row "Cluster peers seen" "${vals[@]}"
 
 vals=()
 for node in "${NODES[@]}"; do
-    status=$(remote_exec "$node" "curl -sf http://localhost:6333/cluster 2>/dev/null | jq -r '.result.status // \"?\"' 2>/dev/null")
+    status=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/cluster 2>/dev/null | jq -r '.result.status // \"?\"' 2>/dev/null")
     vals+=("$status")
 done
 print_row "Cluster status" "${vals[@]}"
 
 vals=()
 for node in "${NODES[@]}"; do
-    term=$(remote_exec "$node" "curl -sf http://localhost:6333/cluster 2>/dev/null | jq -r '.result.raft_info.term // 0' 2>/dev/null")
+    term=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/cluster 2>/dev/null | jq -r '.result.raft_info.term // 0' 2>/dev/null")
     vals+=("$term")
 done
 print_row "Raft term" "${vals[@]}"
 
 vals=()
 for node in "${NODES[@]}"; do
-    commit=$(remote_exec "$node" "curl -sf http://localhost:6333/cluster 2>/dev/null | jq -r '.result.raft_info.commit // 0' 2>/dev/null")
+    commit=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/cluster 2>/dev/null | jq -r '.result.raft_info.commit // 0' 2>/dev/null")
     vals+=("$commit")
 done
 print_row "Raft commit" "${vals[@]}"
@@ -144,7 +144,7 @@ sep
 
 vals=()
 for node in "${NODES[@]}"; do
-    result=$(remote_exec "$node" "curl -sf http://localhost:6333/healthz > /dev/null && echo OK || echo FAIL")
+    result=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/healthz > /dev/null && echo OK || echo FAIL")
     vals+=("$result")
 done
 print_row "Qdrant :6333 health" "${vals[@]}"

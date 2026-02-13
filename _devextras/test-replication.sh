@@ -50,7 +50,7 @@ generate_vector() {
 
 # Check if collection exists
 echo -e "${BLUE}1. Checking collection exists...${NC}"
-collection_exists=$(remote_exec "web1" "curl -sf http://localhost:6333/collections/$COLLECTION 2>/dev/null" || echo "")
+collection_exists=$(remote_exec "web1" "curl -sf http://${NODES[web1]}:6333/collections/$COLLECTION 2>/dev/null" || echo "")
 
 if [[ -z "$collection_exists" ]] || [[ "$collection_exists" == *"not found"* ]]; then
     echo -e "${RED}✗${NC} Collection '$COLLECTION' does not exist!"
@@ -87,7 +87,7 @@ INSERT_PAYLOAD=$(cat <<EOF
 EOF
 )
 
-insert_result=$(remote_exec "web1" "curl -s -X PUT 'http://localhost:6333/collections/$COLLECTION/points?wait=true' -H 'Content-Type: application/json' -d '$INSERT_PAYLOAD'" || echo "CURL_FAILED")
+insert_result=$(remote_exec "web1" "curl -s -X PUT 'http://${NODES[web1]}:6333/collections/$COLLECTION/points?wait=true' -H 'Content-Type: application/json' -d '$INSERT_PAYLOAD'" || echo "CURL_FAILED")
 
 if [[ "$insert_result" == *"completed"* ]] || [[ "$insert_result" == *'"status":"ok"'* ]]; then
     echo -e "${GREEN}✓${NC} Point inserted successfully"
@@ -112,7 +112,7 @@ for node in "${!NODES[@]}"; do
     echo -n "   $node: "
     
     # Try to retrieve the point
-    point_result=$(remote_exec "$node" "curl -sf 'http://localhost:6333/collections/$COLLECTION/points/$TEST_POINT_ID'" || echo "FAILED")
+    point_result=$(remote_exec "$node" "curl -sf 'http://${NODES[$node]}:6333/collections/$COLLECTION/points/$TEST_POINT_ID'" || echo "FAILED")
     
     if [[ "$point_result" == *"$TEST_POINT_ID"* ]]; then
         echo -e "${GREEN}✓${NC} Point found"
@@ -141,7 +141,7 @@ EOF
 for node in "${!NODES[@]}"; do
     echo -n "   $node search: "
     
-    search_result=$(remote_exec "$node" "curl -sf -X POST 'http://localhost:6333/collections/$COLLECTION/points/search' -H 'Content-Type: application/json' -d '$SEARCH_PAYLOAD'" || echo "FAILED")
+    search_result=$(remote_exec "$node" "curl -sf -X POST 'http://${NODES[$node]}:6333/collections/$COLLECTION/points/search' -H 'Content-Type: application/json' -d '$SEARCH_PAYLOAD'" || echo "FAILED")
     
     if [[ "$search_result" == *"$TEST_POINT_ID"* ]]; then
         score=$(echo "$search_result" | jq -r '.result[0].score // 0' 2>/dev/null || echo "?")
@@ -155,7 +155,7 @@ done
 echo ""
 echo -e "${BLUE}6. Cleaning up test point...${NC}"
 
-delete_result=$(remote_exec "web1" "curl -sf -X POST 'http://localhost:6333/collections/$COLLECTION/points/delete?wait=true' -H 'Content-Type: application/json' -d '{\"points\": [\"$TEST_POINT_ID\"]}'" || echo "FAILED")
+delete_result=$(remote_exec "web1" "curl -sf -X POST 'http://${NODES[web1]}:6333/collections/$COLLECTION/points/delete?wait=true' -H 'Content-Type: application/json' -d '{\"points\": [\"$TEST_POINT_ID\"]}'" || echo "FAILED")
 
 if [[ "$delete_result" == *"completed"* ]] || [[ "$delete_result" == *"status"* ]]; then
     echo -e "${GREEN}✓${NC} Test point deleted"
@@ -180,7 +180,7 @@ else
     echo "  3. Collection replication_factor < 3"
     echo ""
     echo "Debug commands:"
-    echo "  - Check cluster status: ssh web1 'curl -s http://localhost:6333/cluster | jq'"
-    echo "  - Check collection config: ssh web1 'curl -s http://localhost:6333/collections/$COLLECTION | jq'"
+    echo "  - Check cluster status: ssh web1 'curl -s http://${NODES[web1]}:6333/cluster | jq'"
+    echo "  - Check collection config: ssh web1 'curl -s http://${NODES[web1]}:6333/collections/$COLLECTION | jq'"
     echo "  - Check logs: ssh web1 'docker compose logs qdrant'"
 fi

@@ -167,7 +167,7 @@ for node in "${!NODES[@]}"; do
     subsection "Qdrant on $node"
     
     # Check /healthz endpoint
-    healthz=$(remote_exec "$node" "curl -sf http://localhost:6333/healthz 2>/dev/null" || echo "FAILED")
+    healthz=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/healthz 2>/dev/null" || echo "FAILED")
     if [[ "$healthz" == *"ok"* ]] || [[ "$healthz" == *"title"* ]]; then
         pass "Qdrant /healthz: OK"
     else
@@ -196,7 +196,7 @@ declare -A RAFT_COMMITS
 for node in "${!NODES[@]}"; do
     subsection "Cluster view from $node"
     
-    cluster_json=$(remote_exec "$node" "curl -sf http://localhost:6333/cluster 2>/dev/null" || echo "{}")
+    cluster_json=$(remote_exec "$node" "curl -sf http://${NODES[$node]}:6333/cluster 2>/dev/null" || echo "{}")
     
     if [[ "$cluster_json" == "{}" ]] || [[ -z "$cluster_json" ]]; then
         fail "Cannot fetch cluster status"
@@ -268,7 +268,7 @@ section "5. COLLECTION STATUS & REPLICATION"
 # Get collection info from bootstrap node (web1)
 subsection "Collection: user_memories"
 
-collection_json=$(remote_exec "web1" "curl -sf http://localhost:6333/collections/user_memories 2>/dev/null" || echo "{}")
+collection_json=$(remote_exec "web1" "curl -sf http://${NODES[web1]}:6333/collections/user_memories 2>/dev/null" || echo "{}")
 
 if [[ "$collection_json" == "{}" ]]; then
     warn "Collection 'user_memories' not found - may need to create it"
@@ -313,7 +313,7 @@ fi
 echo ""
 subsection "Shard Distribution"
 
-cluster_info=$(remote_exec "web1" "curl -sf 'http://localhost:6333/collections/user_memories/cluster' 2>/dev/null" || echo "{}")
+cluster_info=$(remote_exec "web1" "curl -sf 'http://${NODES[web1]}:6333/collections/user_memories/cluster' 2>/dev/null" || echo "{}")
 
 if [[ "$cluster_info" != "{}" ]]; then
     # Show shard locations
