@@ -14,7 +14,7 @@ ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node2.sh"
 ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node3.sh"
 
 # Check cluster status
-ssh web1 "curl -s http://localhost:6333/cluster | jq '.result.peers | keys | length'"
+ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | length'"
 ```
 
 ## Infrastructure
@@ -110,7 +110,7 @@ ssh web1 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node1.sh"
 Wait for health check to pass:
 
 ```bash
-ssh web1 "curl -s http://localhost:6333/healthz"
+ssh web1 "curl -s http://10.0.0.2:6333/healthz"
 ```
 
 ### 4. Start joining nodes
@@ -123,14 +123,14 @@ ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node3.sh"
 ### 5. Verify cluster
 
 ```bash
-ssh web1 "curl -s http://localhost:6333/cluster | jq '.result.peers | keys | length'"
+ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | length'"
 # Should return: 3
 ```
 
 ### 6. Create collection with replication
 
 ```bash
-ssh web1 'curl -X PUT "http://localhost:6333/collections/user_memories" \
+ssh web1 'curl -X PUT "http://10.0.0.2:6333/collections/user_memories" \
   -H "Content-Type: application/json" \
   -d "{
     \"vectors\": { \"size\": 1024, \"distance\": \"Cosine\" },
@@ -138,13 +138,16 @@ ssh web1 'curl -X PUT "http://localhost:6333/collections/user_memories" \
     \"replication_factor\": 3,
     \"write_consistency_factor\": 2
   }"'
+
+# Or use the setup script:
+ssh web1 "cd /netroot/synaplanCluster/synaplan-memories/_devextras && ./setup-collection.sh user_memories 1024 10.0.0.2"
 ```
 
 ## Ports
 
 | Port | Protocol | Purpose | Access |
 |------|----------|---------|--------|
-| 6333 | HTTP | Qdrant REST API | localhost only |
+| 6333 | HTTP | Qdrant REST API | Internal network (10.0.0.x) |
 | 6334 | gRPC | Qdrant gRPC API | Docker network |
 | 6335 | TCP | P2P cluster sync | 10.0.0.x network |
 | 8090 | HTTP | qdrant-service REST | Host (for backend) |
@@ -165,7 +168,7 @@ wait
 ### Check cluster health
 
 ```bash
-ssh web1 "curl -s http://localhost:6333/cluster | jq"
+ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq"
 ```
 
 ### View logs
@@ -192,8 +195,8 @@ If a node is rebuilt:
 ssh web2 "sudo mkdir -p /qdrant/storage && sudo chown -R 1000:1000 /qdrant"
 
 # 2. Remove old peer (run on healthy node)
-OLD_PEER_ID=$(ssh web1 "curl -s http://localhost:6333/cluster | jq -r '.result.peers | keys[1]'")
-ssh web1 "curl -X DELETE 'http://localhost:6333/cluster/peer/${OLD_PEER_ID}?force=true'"
+OLD_PEER_ID=$(ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq -r '.result.peers | keys[1]'")
+ssh web1 "curl -X DELETE 'http://10.0.0.2:6333/cluster/peer/${OLD_PEER_ID}?force=true'"
 
 # 3. Start new node
 ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node2.sh"
@@ -205,10 +208,10 @@ Create snapshots and sync to NFS:
 
 ```bash
 # Create snapshot
-ssh web1 "curl -X POST 'http://localhost:6333/collections/user_memories/snapshots'"
+ssh web1 "curl -X POST 'http://10.0.0.2:6333/collections/user_memories/snapshots'"
 
 # List snapshots
-ssh web1 "curl -s 'http://localhost:6333/collections/user_memories/snapshots' | jq"
+ssh web1 "curl -s 'http://10.0.0.2:6333/collections/user_memories/snapshots' | jq"
 
 # Sync to NFS backup
 ssh web1 "rsync -av /qdrant/storage/snapshots/ /netroot/backups/qdrant/web1/"
@@ -217,7 +220,7 @@ ssh web1 "rsync -av /qdrant/storage/snapshots/ /netroot/backups/qdrant/web1/"
 ## Security Notes
 
 1. **P2P port (6335)**: Only accessible on internal 10.0.0.x network
-2. **REST API (6333)**: Bound to localhost only in production
+2. **REST API (6333)**: Bound to node's internal IP (10.0.0.x) only
 3. **qdrant-service (8090)**: Protected by SERVICE_API_KEY
 4. **Consider enabling**: Qdrant native authentication (`QDRANT_API_KEY`) and TLS
 

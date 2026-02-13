@@ -18,6 +18,10 @@ services:
     image: qdrant/qdrant:v1.13.0
     container_name: synaplan-qdrant
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     ports:
       # P2P port for cluster communication (cluster mode only)
       - "${QDRANT_P2P_PORT:-6335}:6335"
