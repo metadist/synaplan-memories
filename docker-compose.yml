@@ -49,6 +49,9 @@ services:
     # Disable healthcheck - qdrant-service handles connection retries
     healthcheck:
       disable: true
+    networks:
+      - default
+      - synaplan
 
   # Qdrant Service (Rust microservice wrapper)
   # Always built from source (./qdrant-service)
@@ -82,6 +85,9 @@ services:
       WEBHOOK_URL: ${WEBHOOK_URL:-}
       # Logging
       RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
+    networks:
+      - default
+      - synaplan
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
       interval: 10s
@@ -92,3 +98,9 @@ services:
 volumes:
   qdrant_storage:
     driver: local
+
+networks:
+  default:
+  synaplan:
+    external: true
+    name: synaplan-swiss_synaplan
