@@ -1,0 +1,21 @@
+# Swiss platform network integration
+# Usage: docker compose -f docker-compose.yml -f docker-compose.swiss.yml up -d
+#
+# Only needed when running alongside synaplan-swiss.
+# Developers can use plain `docker compose up -d` without this file.
+
+services:
+  qdrant:
+    networks:
+      - default
+      - synaplan
+
+  qdrant-service:
+    networks:
+      - default
+      - synaplan
+
+networks:
+  synaplan:
+    external: true
+    name: synaplan-swiss_synaplan

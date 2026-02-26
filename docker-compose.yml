@@ -8,6 +8,10 @@
 #   - Builds qdrant-service from source
 #   - Ports exposed for debugging
 #
+# PLATFORM DEPLOYMENT (with synaplan-swiss):
+#   docker compose -f docker-compose.yml -f docker-compose.swiss.yml up -d
+#   - Joins the synaplan-swiss network so Synaplan can reach qdrant-service
+#
 # CLUSTER DEPLOYMENT:
 #   See CLUSTER.md for full instructions.
 #   Uses env_file and QDRANT_COMMAND for cluster configuration.
@@ -49,10 +53,6 @@ services:
     # Disable healthcheck - qdrant-service handles connection retries
     healthcheck:
       disable: true
-    networks:
-      - default
-      - synaplan
-
   # Qdrant Service (Rust microservice wrapper)
   # Always built from source (./qdrant-service)
   qdrant-service:
@@ -85,9 +85,6 @@ services:
       WEBHOOK_URL: ${WEBHOOK_URL:-}
       # Logging
       RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
-    networks:
-      - default
-      - synaplan
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
       interval: 10s
@@ -98,9 +95,3 @@ services:
 volumes:
   qdrant_storage:
     driver: local
-
-networks:
-  default:
-  synaplan:
-    external: true
-    name: synaplan-swiss_synaplan
