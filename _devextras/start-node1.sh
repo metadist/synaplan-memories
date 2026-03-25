@@ -33,8 +33,8 @@ export QDRANT_CLUSTER_ENABLED=true
 export QDRANT_COMMAND="./qdrant --uri http://${NODE_IP}:6335"
 export QDRANT_STORAGE_PATH=/qdrant/storage
 
-# Bind REST API to internal network IP (not all interfaces)
-export QDRANT_REST_PORT=${NODE_IP}:6333
+# Bind REST API to all interfaces (needed for Docker bridge access from platform)
+export QDRANT_REST_PORT=6333
 
 echo "  Qdrant Storage: /qdrant/storage (local)"
 echo "  REST API: http://${NODE_IP}:6333"
