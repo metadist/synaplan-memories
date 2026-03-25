@@ -17,7 +17,7 @@
 
 services:
   qdrant:
-    image: qdrant/qdrant:v1.13.0
+    image: qdrant/qdrant:v1.17.0
     container_name: synaplan-qdrant
     restart: unless-stopped
     ulimits:
@@ -40,7 +40,6 @@ services:
       QDRANT__SERVICE__GRPC_PORT: "6334"
       QDRANT__SERVICE__HTTP_PORT: "6333"
       QDRANT__LOG_LEVEL: "${QDRANT_LOG_LEVEL:-INFO}"
-      QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY:-}"
       # Cluster settings (only used when QDRANT_COMMAND is set)
       QDRANT__CLUSTER__ENABLED: "${QDRANT_CLUSTER_ENABLED:-false}"
       QDRANT__CLUSTER__P2P__PORT: "6335"
