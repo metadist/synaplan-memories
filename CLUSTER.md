@@ -1,6 +1,6 @@
 # Qdrant Cluster Deployment Guide
 
-This document describes deploying the Synaplan Memory Service (Qdrant + qdrant-service) as a 3-node cluster.
+This document describes deploying Qdrant as a 3-node cluster for the Synaplan platform.
 
 ## Quick Reference
 
@@ -9,9 +9,9 @@ This document describes deploying the Synaplan Memory Service (Qdrant + qdrant-s
 ssh -p16803 root@synastorev1.synaplan.com
 
 # Start cluster (initial or after full shutdown)
-ssh web1 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node1.sh"
-ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node2.sh"
-ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node3.sh"
+ssh web1 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node1.sh"
+ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node2.sh"
+ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node3.sh"
 
 # Check cluster status
 ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | length'"
@@ -39,17 +39,12 @@ ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | leng
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Memory Service Cluster                        │
+│                      Qdrant Cluster                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │   web1 (10.0.0.2)      web2 (10.0.0.7)      web3 (10.0.0.8)    │
 │                                                                  │
 │   ┌─────────────┐      ┌─────────────┐      ┌─────────────┐     │
-│   │qdrant-svc   │      │qdrant-svc   │      │qdrant-svc   │     │
-│   │ :8090       │      │ :8090       │      │ :8090       │     │
-│   └──────┬──────┘      └──────┬──────┘      └──────┬──────┘     │
-│          │                    │                    │             │
-│   ┌──────▼──────┐      ┌──────▼──────┐      ┌──────▼──────┐     │
 │   │ Qdrant      │◄────►│ Qdrant      │◄────►│ Qdrant      │     │
 │   │ :6333/:6334 │ P2P  │ :6333/:6334 │ P2P  │ :6333/:6334 │     │
 │   │ :6335       │      │ :6335       │      │ :6335       │     │
@@ -59,6 +54,8 @@ ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | leng
 │   (Local SSD)          (Local SSD)          (Local SSD)         │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
+
+Synaplan backend (PHP) connects to any node on port 6333 via QDRANT_URL.
 ```
 
 ## Why Local SSD?
@@ -83,28 +80,21 @@ for host in web1 web2 web3; do
 done
 ```
 
-### 2. Configure environment
+### 2. Configure environment (optional)
 
 ```bash
 cd /wwwroot/synaplanCluster/synaplan-memories
 
-# Create .env from template
+# Create .env from template (only needed if you want API key auth)
 cp .env.example .env
-
-# Generate and set API key
-APIKEY=$(openssl rand -hex 32)
-sed -i "s/changeme-in-production/$APIKEY/" .env
-
-# Verify
-cat .env
 ```
 
-**Important**: Copy the same `SERVICE_API_KEY` to the platform's `.env` as `QDRANT_SERVICE_API_KEY`.
+If you want Qdrant native authentication, set `QDRANT_API_KEY` in `.env`. Then set the same key in the platform's `.env` so the backend can authenticate.
 
 ### 3. Start bootstrap node first
 
 ```bash
-ssh web1 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node1.sh"
+ssh web1 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node1.sh"
 ```
 
 Wait for health check to pass:
@@ -116,8 +106,8 @@ ssh web1 "curl -s http://10.0.0.2:6333/healthz"
 ### 4. Start joining nodes
 
 ```bash
-ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node2.sh"
-ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node3.sh"
+ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node2.sh"
+ssh web3 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node3.sh"
 ```
 
 ### 5. Verify cluster
@@ -130,16 +120,6 @@ ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq '.result.peers | keys | leng
 ### 6. Create collection with replication
 
 ```bash
-ssh web1 'curl -X PUT "http://10.0.0.2:6333/collections/user_memories" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"vectors\": { \"size\": 1024, \"distance\": \"Cosine\" },
-    \"shard_number\": 3,
-    \"replication_factor\": 3,
-    \"write_consistency_factor\": 2
-  }"'
-
-# Or use the setup script:
 ssh web1 "cd /netroot/synaplanCluster/synaplan-memories/_devextras && ./setup-collection.sh user_memories 1024 10.0.0.2"
 ```
 
@@ -150,7 +130,6 @@ ssh web1 "cd /netroot/synaplanCluster/synaplan-memories/_devextras && ./setup-co
 | 6333 | HTTP | Qdrant REST API | Internal network (10.0.0.x) |
 | 6334 | gRPC | Qdrant gRPC API | Docker network |
 | 6335 | TCP | P2P cluster sync | 10.0.0.x network |
-| 8090 | HTTP | qdrant-service REST | Host (for backend) |
 
 ## Operations
 
@@ -199,7 +178,7 @@ OLD_PEER_ID=$(ssh web1 "curl -s http://10.0.0.2:6333/cluster | jq -r '.result.pe
 ssh web1 "curl -X DELETE 'http://10.0.0.2:6333/cluster/peer/${OLD_PEER_ID}?force=true'"
 
 # 3. Start new node
-ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./start-node2.sh"
+ssh web2 "cd /netroot/synaplanCluster/synaplan-memories && ./_devextras/start-node2.sh"
 ```
 
 ## Backup
@@ -221,8 +200,8 @@ ssh web1 "rsync -av /qdrant/storage/snapshots/ /netroot/backups/qdrant/web1/"
 
 1. **P2P port (6335)**: Only accessible on internal 10.0.0.x network
 2. **REST API (6333)**: Bound to node's internal IP (10.0.0.x) only
-3. **qdrant-service (8090)**: Protected by SERVICE_API_KEY
-4. **Consider enabling**: Qdrant native authentication (`QDRANT_API_KEY`) and TLS
+3. **Optional authentication**: Set `QDRANT_API_KEY` in `.env` to enable native Qdrant auth
+4. **Consider enabling**: TLS for production clusters
 
 ## Troubleshooting
 

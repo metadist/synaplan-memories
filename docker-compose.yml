@@ -1,23 +1,21 @@
-# Synaplan Memory Service - Qdrant Vector Database + Rust Microservice
+# Synaplan Qdrant - Vector Database for Memories, False Positives & File RAG
 #
 # This compose file supports two modes:
 #
 # LOCAL DEVELOPMENT (default):
 #   docker compose up -d
-#   - Single Qdrant instance
-#   - Builds qdrant-service from source
+#   - Single Qdrant instance on port 6333
 #   - Ports exposed for debugging
 #
 # PLATFORM DEPLOYMENT (with synaplan-swiss):
 #   docker compose -f docker-compose.yml -f docker-compose.swiss.yml up -d
-#   - Joins the synaplan-swiss network so Synaplan can reach qdrant-service
+#   - Joins the synaplan-swiss network so Synaplan backend can reach Qdrant
 #
 # CLUSTER DEPLOYMENT:
 #   See CLUSTER.md for full instructions.
-#   Uses env_file and QDRANT_COMMAND for cluster configuration.
+#   Uses QDRANT_COMMAND env var for cluster configuration.
 
 services:
-  # Qdrant Vector Database
   qdrant:
     image: qdrant/qdrant:v1.13.0
     container_name: synaplan-qdrant
@@ -29,7 +27,7 @@ services:
     ports:
       # P2P port for cluster communication (cluster mode only)
       - "${QDRANT_P2P_PORT:-6335}:6335"
-      # REST API - exposed for debugging in dev, internal-only in production
+      # REST API
       - "${QDRANT_REST_PORT:-6333}:6333"
     expose:
       - "6334"  # gRPC API (internal)
@@ -42,6 +40,7 @@ services:
       QDRANT__SERVICE__GRPC_PORT: "6334"
       QDRANT__SERVICE__HTTP_PORT: "6333"
       QDRANT__LOG_LEVEL: "${QDRANT_LOG_LEVEL:-INFO}"
+      QDRANT__SERVICE__API_KEY: "${QDRANT_API_KEY:-}"
       # Cluster settings (only used when QDRANT_COMMAND is set)
       QDRANT__CLUSTER__ENABLED: "${QDRANT_CLUSTER_ENABLED:-false}"
       QDRANT__CLUSTER__P2P__PORT: "6335"
@@ -49,48 +48,6 @@ services:
     # Cluster command (set in start-node*.sh for cluster mode)
     # Leave empty for single-node development
     command: ${QDRANT_COMMAND:-}
-    # Note: qdrant image (debian:slim) doesn't include curl/wget
-    # Disable healthcheck - qdrant-service handles connection retries
-    healthcheck:
-      disable: true
-  # Qdrant Service (Rust microservice wrapper)
-  # Always built from source (./qdrant-service)
-  qdrant-service:
-    build:
-      context: ./qdrant-service
-      dockerfile: Dockerfile
-    container_name: synaplan-qdrant-service
-    restart: unless-stopped
-    env_file:
-      - path: qdrant-service/.env
-        required: false
-    ports:
-      - "8090:8090"
-    depends_on:
-      qdrant:
-        condition: service_started
-    extra_hosts:
-      # Allow access to Docker host (for host.docker.internal on Linux)
-      - "host.docker.internal:host-gateway"
-      # Allow access to internal network (Ollama server, etc.)
-      - "docker-host:host-gateway"
-    environment:
-      # Qdrant connection (via Docker network)
-      QDRANT_URL: http://qdrant:6334
-      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      QDRANT_COLLECTION_NAME: ${QDRANT_COLLECTION_NAME:-user_memories}
-      QDRANT_VECTOR_DIMENSION: "${QDRANT_VECTOR_DIMENSION:-1024}"
-      # Service config
-      PORT: "8090"
-      WEBHOOK_URL: ${WEBHOOK_URL:-}
-      # Logging
-      RUST_LOG: ${RUST_LOG:-synaplan_qdrant_service=info,tower_http=info}
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8090/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
 volumes:
   qdrant_storage:

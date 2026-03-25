@@ -1,7 +1,7 @@
 #!/bin/bash
-# test-full-cluster.sh - Comprehensive test suite for Qdrant Memory Service cluster
+# test-full-cluster.sh - Comprehensive test suite for Qdrant cluster
 #
-# Tests all aspects: connectivity, docker, qdrant cluster, replication, API keys
+# Tests all aspects: connectivity, docker, qdrant cluster, replication
 # Run from management server (synastorev1) or any machine with SSH access to web1-3
 #
 # Usage: ./test-full-cluster.sh [--verbose]
@@ -33,10 +33,10 @@ if [[ "${1:-}" == "--verbose" ]]; then
 fi
 
 # Helper functions
-pass() { echo -e "  ${GREEN}✓${NC} $1"; }
-fail() { echo -e "  ${RED}✗${NC} $1"; ((ERRORS++)) || true; }
-warn() { echo -e "  ${YELLOW}⚠${NC} $1"; ((WARNINGS++)) || true; }
-info() { echo -e "  ${CYAN}ℹ${NC} $1"; }
+pass() { echo -e "  ${GREEN}ok${NC} $1"; }
+fail() { echo -e "  ${RED}FAIL${NC} $1"; ((ERRORS++)) || true; }
+warn() { echo -e "  ${YELLOW}warn${NC} $1"; ((WARNINGS++)) || true; }
+info() { echo -e "  ${CYAN}info${NC} $1"; }
 section() { echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"; }
 subsection() { echo -e "${CYAN}--- $1 ---${NC}"; }
 
@@ -78,12 +78,11 @@ for node in "${!NODES[@]}"; do
     fi
     
     # Port checks from management server
-    for port in 6333 6335 8090; do
+    for port in 6333 6335; do
         if timeout 2 bash -c "echo > /dev/tcp/${NODES[$node]}/$port" 2>/dev/null; then
             pass "Port $port: open"
         else
             if [[ "$port" == "6333" ]]; then
-                # 6333 might be bound to localhost only in production
                 info "Port $port: not exposed (might be localhost-only)"
             else
                 fail "Port $port: closed"
@@ -99,9 +98,9 @@ for src_node in "${!NODES[@]}"; do
     for dst_node in "${!NODES[@]}"; do
         if [[ "$src_node" != "$dst_node" ]]; then
             if remote_check "$src_node" "timeout 2 bash -c 'echo > /dev/tcp/${NODES[$dst_node]}/6335' 2>/dev/null"; then
-                pass "$src_node → $dst_node: P2P OK"
+                pass "$src_node -> $dst_node: P2P OK"
             else
-                fail "$src_node → $dst_node: P2P BLOCKED"
+                fail "$src_node -> $dst_node: P2P BLOCKED"
             fi
         fi
     done
@@ -130,37 +129,16 @@ for node in "${!NODES[@]}"; do
         fail "synaplan-qdrant: $qdrant_status"
     fi
     
-    # Check qdrant-service container
-    service_status=$(remote_exec "$node" "docker inspect -f '{{.State.Status}}' synaplan-qdrant-service 2>/dev/null" || echo "not_found")
-    if [[ "$service_status" == "running" ]]; then
-        pass "synaplan-qdrant-service: running"
-    else
-        fail "synaplan-qdrant-service: $service_status"
-    fi
-    
-    # Check container health
-    service_health=$(remote_exec "$node" "docker inspect -f '{{.State.Health.Status}}' synaplan-qdrant-service 2>/dev/null" || echo "unknown")
-    if [[ "$service_health" == "healthy" ]]; then
-        pass "qdrant-service health: $service_health"
-    elif [[ "$service_health" == "starting" ]]; then
-        warn "qdrant-service health: $service_health (still initializing)"
-    else
-        fail "qdrant-service health: $service_health"
-    fi
-    
     # Show recent logs if verbose
     if $VERBOSE; then
         echo ""
         info "Recent qdrant container logs:"
         remote_exec "$node" "cd /netroot/synaplanCluster/synaplan-memories && docker compose logs --tail=5 qdrant 2>/dev/null" | head -10 || true
-        echo ""
-        info "Recent qdrant-service container logs:"
-        remote_exec "$node" "cd /netroot/synaplanCluster/synaplan-memories && docker compose logs --tail=5 qdrant-service 2>/dev/null" | head -10 || true
     fi
 done
 
 ##############################################################################
-section "3. QDRANT LOCAL HEALTH (per node)"
+section "3. QDRANT HEALTH (per node)"
 ##############################################################################
 
 for node in "${!NODES[@]}"; do
@@ -172,14 +150,6 @@ for node in "${!NODES[@]}"; do
         pass "Qdrant /healthz: OK"
     else
         fail "Qdrant /healthz: $healthz"
-    fi
-    
-    # Check qdrant-service /health endpoint
-    svc_health=$(remote_exec "$node" "curl -sf http://localhost:8090/health 2>/dev/null" || echo "FAILED")
-    if [[ "$svc_health" == *"status"*"ok"* ]] || [[ "$svc_health" == *"healthy"* ]]; then
-        pass "qdrant-service /health: OK"
-    else
-        fail "qdrant-service /health: $svc_health"
     fi
 done
 
@@ -265,7 +235,6 @@ fi
 section "5. COLLECTION STATUS & REPLICATION"
 ##############################################################################
 
-# Get collection info from bootstrap node (web1)
 subsection "Collection: user_memories"
 
 collection_json=$(remote_exec "web1" "curl -sf http://${NODES[web1]}:6333/collections/user_memories 2>/dev/null" || echo "{}")
@@ -273,7 +242,6 @@ collection_json=$(remote_exec "web1" "curl -sf http://${NODES[web1]}:6333/collec
 if [[ "$collection_json" == "{}" ]]; then
     warn "Collection 'user_memories' not found - may need to create it"
 else
-    # Parse collection info
     shard_count=$(echo "$collection_json" | jq -r '.result.config.params.shard_number // 0' 2>/dev/null)
     repl_factor=$(echo "$collection_json" | jq -r '.result.config.params.replication_factor // 0' 2>/dev/null)
     write_cf=$(echo "$collection_json" | jq -r '.result.config.params.write_consistency_factor // 0' 2>/dev/null)
@@ -316,10 +284,8 @@ subsection "Shard Distribution"
 cluster_info=$(remote_exec "web1" "curl -sf 'http://${NODES[web1]}:6333/collections/user_memories/cluster' 2>/dev/null" || echo "{}")
 
 if [[ "$cluster_info" != "{}" ]]; then
-    # Show shard locations
     echo "$cluster_info" | jq -r '.result.local_shards[]? | "  Shard \(.shard_id): \(.state)"' 2>/dev/null || info "Could not parse shard info"
     
-    # Check for inactive shards
     inactive=$(echo "$cluster_info" | jq -r '[.result.local_shards[]? | select(.state != "Active")] | length' 2>/dev/null || echo "0")
     if [[ "$inactive" == "0" ]]; then
         pass "All local shards active"
@@ -329,57 +295,15 @@ if [[ "$cluster_info" != "{}" ]]; then
 fi
 
 ##############################################################################
-section "6. API KEY VERIFICATION"
+section "6. PLATFORM CONNECTIVITY"
 ##############################################################################
 
-# Check if API keys match between platform and memory service
-subsection "API Key Configuration"
-
-for node in "${!NODES[@]}"; do
-    # Get SERVICE_API_KEY from qdrant-service container
-    svc_key=$(remote_exec "$node" "docker exec synaplan-qdrant-service printenv SERVICE_API_KEY 2>/dev/null" || echo "")
-    
-    if [[ -z "$svc_key" ]]; then
-        warn "$node: SERVICE_API_KEY not set in qdrant-service container"
-    else
-        # Mask the key for display
-        masked_key="${svc_key:0:4}...${svc_key: -4}"
-        info "$node: SERVICE_API_KEY = $masked_key"
-    fi
-done
-
-# Check platform's configured key
-echo ""
-subsection "Platform API Key (from .env)"
-
-platform_key=$(grep -E "^QDRANT_SERVICE_API_KEY=" /wwwroot/synaplan-platform/.env 2>/dev/null | cut -d= -f2 || echo "")
-if [[ -n "$platform_key" ]]; then
-    masked="${platform_key:0:4}...${platform_key: -4}"
-    info "Platform QDRANT_SERVICE_API_KEY = $masked"
-    
-    # Compare with first node's key
-    node1_key=$(remote_exec "web1" "docker exec synaplan-qdrant-service printenv SERVICE_API_KEY 2>/dev/null" || echo "")
-    if [[ "$platform_key" == "$node1_key" ]]; then
-        pass "API keys match between platform and memory service"
-    else
-        fail "API keys DO NOT match! Platform and qdrant-service have different keys"
-    fi
-else
-    fail "QDRANT_SERVICE_API_KEY not found in platform .env"
-fi
-
-##############################################################################
-section "7. DOCKER INTERNAL CONNECTIVITY TEST"
-##############################################################################
-
-# Test that the synaplan-platform container can reach qdrant-service
-subsection "Platform → qdrant-service connectivity"
+subsection "Platform -> Qdrant connectivity"
 
 for node in "${!NODES[@]}"; do
     echo ""
     info "Testing from $node..."
     
-    # Check if platform container exists
     platform_status=$(remote_exec "$node" "docker inspect -f '{{.State.Status}}' synaplan-platform 2>/dev/null" || echo "not_found")
     
     if [[ "$platform_status" != "running" ]]; then
@@ -395,54 +319,14 @@ for node in "${!NODES[@]}"; do
         fail "$node: docker-host does not resolve"
     fi
     
-    # Test connectivity from platform to qdrant-service
-    health_check=$(remote_exec "$node" "docker exec synaplan-platform curl -sf http://docker-host:8090/health 2>/dev/null" || echo "FAILED")
-    if [[ "$health_check" == *"status"* ]] || [[ "$health_check" == *"ok"* ]]; then
-        pass "$node: Platform can reach qdrant-service"
+    # Test connectivity from platform to Qdrant
+    health_check=$(remote_exec "$node" "docker exec synaplan-platform curl -sf http://docker-host:6333/healthz 2>/dev/null" || echo "FAILED")
+    if [[ "$health_check" != "FAILED" ]]; then
+        pass "$node: Platform can reach Qdrant on :6333"
     else
-        fail "$node: Platform CANNOT reach qdrant-service"
-        # Try to diagnose
-        curl_verbose=$(remote_exec "$node" "docker exec synaplan-platform curl -v http://docker-host:8090/health 2>&1 | head -20" || echo "")
-        if $VERBOSE; then
-            info "Verbose curl output:"
-            echo "$curl_verbose"
-        fi
+        fail "$node: Platform CANNOT reach Qdrant on :6333"
     fi
 done
-
-##############################################################################
-section "8. END-TO-END MEMORY SERVICE TEST"
-##############################################################################
-
-subsection "Test memory operations via qdrant-service API"
-
-# Pick a working node (prefer web1)
-test_node="web1"
-
-# Get API key
-api_key=$(remote_exec "$test_node" "docker exec synaplan-qdrant-service printenv SERVICE_API_KEY 2>/dev/null" || echo "")
-
-if [[ -z "$api_key" ]]; then
-    warn "Cannot perform E2E test: no API key available"
-else
-    # Test health with API key
-    health_auth=$(remote_exec "$test_node" "curl -sf -H 'X-API-Key: $api_key' http://localhost:8090/health 2>/dev/null" || echo "FAILED")
-    if [[ "$health_auth" == *"ok"* ]] || [[ "$health_auth" == *"status"* ]]; then
-        pass "Authenticated health check: OK"
-    else
-        fail "Authenticated health check failed"
-    fi
-    
-    # Test stats endpoint
-    stats=$(remote_exec "$test_node" "curl -sf -H 'X-API-Key: $api_key' http://localhost:8090/stats 2>/dev/null" || echo "FAILED")
-    if [[ "$stats" == *"collection"* ]] || [[ "$stats" == *"points"* ]]; then
-        pass "Stats endpoint: accessible"
-        point_count=$(echo "$stats" | jq -r '.points_count // 0' 2>/dev/null || echo "?")
-        info "Points in collection: $point_count"
-    else
-        warn "Stats endpoint: $stats"
-    fi
-fi
 
 ##############################################################################
 section "SUMMARY"
@@ -462,9 +346,8 @@ fi
 echo ""
 echo "Next steps if issues found:"
 echo "  1. Check container logs: docker compose logs -f"
-echo "  2. Verify .env files have matching SERVICE_API_KEY values"
-echo "  3. Ensure /qdrant/storage is on LOCAL disk (not NFS)"
-echo "  4. Check firewall rules for port 6335 between nodes"
+echo "  2. Ensure /qdrant/storage is on LOCAL disk (not NFS)"
+echo "  3. Check firewall rules for port 6335 between nodes"
 echo ""
 
 exit $ERRORS

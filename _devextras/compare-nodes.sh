@@ -17,9 +17,7 @@ NC='\033[0m'
 # Nodes
 NODES=("web1" "web2" "web3")
 
-echo -e "${BLUE}╔═══════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║          Node Configuration Comparison                         ║${NC}"
-echo -e "${BLUE}╚═══════════════════════════════════════════════════════════════╝${NC}"
+echo -e "${BLUE}=== Node Configuration Comparison ===${NC}"
 echo ""
 
 # Helper
@@ -66,20 +64,6 @@ for node in "${NODES[@]}"; do
 done
 print_row "qdrant container" "${vals[@]}"
 
-vals=()
-for node in "${NODES[@]}"; do
-    status=$(remote_exec "$node" "docker inspect -f '{{.State.Status}}' synaplan-qdrant-service")
-    vals+=("$status")
-done
-print_row "qdrant-service container" "${vals[@]}"
-
-vals=()
-for node in "${NODES[@]}"; do
-    health=$(remote_exec "$node" "docker inspect -f '{{.State.Health.Status}}' synaplan-qdrant-service")
-    vals+=("$health")
-done
-print_row "qdrant-service health" "${vals[@]}"
-
 sep
 
 #------------------------------------------------------------------------------
@@ -118,27 +102,6 @@ print_row "Raft commit" "${vals[@]}"
 sep
 
 #------------------------------------------------------------------------------
-# API keys
-#------------------------------------------------------------------------------
-
-vals=()
-for node in "${NODES[@]}"; do
-    key=$(remote_exec "$node" "docker exec synaplan-qdrant-service printenv SERVICE_API_KEY 2>/dev/null | head -c 4")
-    [[ -z "$key" ]] && key="NOT_SET"
-    vals+=("${key}...")
-done
-print_row "SERVICE_API_KEY (first 4)" "${vals[@]}"
-
-vals=()
-for node in "${NODES[@]}"; do
-    key=$(remote_exec "$node" "docker exec synaplan-platform printenv QDRANT_SERVICE_API_KEY 2>/dev/null | head -c 4" || echo "N/A")
-    vals+=("${key}...")
-done
-print_row "Platform API_KEY (first 4)" "${vals[@]}"
-
-sep
-
-#------------------------------------------------------------------------------
 # Network connectivity
 #------------------------------------------------------------------------------
 
@@ -148,20 +111,6 @@ for node in "${NODES[@]}"; do
     vals+=("$result")
 done
 print_row "Qdrant :6333 health" "${vals[@]}"
-
-vals=()
-for node in "${NODES[@]}"; do
-    result=$(remote_exec "$node" "curl -sf http://localhost:8090/health > /dev/null && echo OK || echo FAIL")
-    vals+=("$result")
-done
-print_row "Service :8090 health" "${vals[@]}"
-
-vals=()
-for node in "${NODES[@]}"; do
-    result=$(remote_exec "$node" "docker exec synaplan-platform curl -sf http://docker-host:8090/health > /dev/null 2>&1 && echo OK || echo FAIL")
-    vals+=("$result")
-done
-print_row "Platform->docker-host:8090" "${vals[@]}"
 
 sep
 
@@ -193,24 +142,8 @@ print_row "Storage usage" "${vals[@]}"
 sep
 
 #------------------------------------------------------------------------------
-# Environment differences
+# Docker Image Versions
 #------------------------------------------------------------------------------
-
-echo ""
-echo -e "${BLUE}Environment Variables (qdrant-service):${NC}"
-echo ""
-
-for var in QDRANT_URL QDRANT_COLLECTION_NAME PORT EMBEDDING_BACKEND OLLAMA_BASE_URL; do
-    vals=()
-    for node in "${NODES[@]}"; do
-        val=$(remote_exec "$node" "docker exec synaplan-qdrant-service printenv $var 2>/dev/null")
-        [[ -z "$val" ]] && val="-"
-        # Truncate long values
-        [[ ${#val} -gt 18 ]] && val="${val:0:15}..."
-        vals+=("$val")
-    done
-    print_row "$var" "${vals[@]}"
-done
 
 echo ""
 echo -e "${BLUE}Docker Image Versions:${NC}"
@@ -223,20 +156,12 @@ for node in "${NODES[@]}"; do
 done
 print_row "qdrant image tag" "${vals[@]}"
 
-vals=()
-for node in "${NODES[@]}"; do
-    # Get build time or commit from image
-    created=$(remote_exec "$node" "docker inspect -f '{{.Created}}' synaplan-qdrant-service 2>/dev/null | cut -d'T' -f1")
-    vals+=("$created")
-done
-print_row "qdrant-service built" "${vals[@]}"
-
 #------------------------------------------------------------------------------
 echo ""
-echo -e "${BLUE}══════════════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}======================================${NC}"
 echo ""
 echo "Legend:"
 echo "  - All values in a row should match (or be expected to differ)"
-echo "  - Red flags: API keys mismatch, storage on NFS, missing containers"
+echo "  - Red flags: storage on NFS, missing containers"
 echo "  - Check differences to find why web1 works but others don't"
 echo ""

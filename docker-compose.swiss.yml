@@ -10,11 +10,6 @@ services:
       - default
       - synaplan
 
-  qdrant-service:
-    networks:
-      - default
-      - synaplan
-
 networks:
   synaplan:
     external: true

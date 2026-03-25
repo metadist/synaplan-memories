@@ -31,24 +31,16 @@ check_node() {
     
     # Check if we can reach the node
     if ! ping -c 1 -W 2 "${node_ip}" > /dev/null 2>&1; then
-        echo -e "  ${RED}✗ Node unreachable${NC}"
+        echo -e "  ${RED}x Node unreachable${NC}"
         return 1
     fi
     
     # Check Qdrant health endpoints
     echo -n "  Health endpoints: "
     if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" "curl -sf http://${node_ip}:6333/healthz > /dev/null 2>&1" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
+        echo -e "${GREEN}ok${NC}"
     else
-        echo -e "${RED}✗${NC}"
-    fi
-    
-    # Check qdrant-service health
-    echo -n "  qdrant-service: "
-    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${node_name}" "curl -sf http://localhost:8090/health > /dev/null 2>&1" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
-    else
-        echo -e "${RED}✗${NC}"
+        echo -e "${RED}FAIL${NC}"
     fi
     
     # Get cluster status
@@ -57,24 +49,24 @@ check_node() {
         "curl -sf http://${node_ip}:6333/cluster 2>/dev/null" 2>/dev/null || echo "")
     
     if [ -z "$cluster_status" ]; then
-        echo -e "${RED}✗ Cannot fetch${NC}"
+        echo -e "${RED}cannot fetch${NC}"
     else
         local peer_count=$(echo "$cluster_status" | jq -r '.result.peers | keys | length' 2>/dev/null || echo "0")
         local status=$(echo "$cluster_status" | jq -r '.result.status // "unknown"' 2>/dev/null || echo "unknown")
         
         if [ "$peer_count" = "3" ] && [ "$status" != "unknown" ]; then
-            echo -e "${GREEN}✓${NC} (${peer_count} peers, status: ${status})"
+            echo -e "${GREEN}ok${NC} (${peer_count} peers, status: ${status})"
         else
-            echo -e "${YELLOW}⚠${NC} (${peer_count} peers, status: ${status})"
+            echo -e "${YELLOW}warning${NC} (${peer_count} peers, status: ${status})"
         fi
     fi
     
     # Check P2P port connectivity
     echo -n "  P2P port (6335): "
     if timeout 2 bash -c "echo > /dev/tcp/${node_ip}/6335" 2>/dev/null; then
-        echo -e "${GREEN}✓${NC}"
+        echo -e "${GREEN}ok${NC}"
     else
-        echo -e "${RED}✗${NC}"
+        echo -e "${RED}FAIL${NC}"
     fi
     
     echo ""
@@ -87,4 +79,3 @@ done
 
 echo -e "${BLUE}=== Summary ===${NC}"
 echo "Run 'check-cluster-sync.sh' for detailed synchronization check"
-echo "Run 'check-loadbalancer.sh' to test load balancer"
